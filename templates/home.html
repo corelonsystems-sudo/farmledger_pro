@@ -1,0 +1,393 @@
+﻿{% extends 'dashboard/base.html' %}
+{% load currency_tags %}
+
+{% block title %}{{ report_title }}{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+{% block breadcrumbs %}Dashboard{% endblock %}
+
+{% block extra_head %}
+    <style>
+        /* Welcome banner */
+        .welcome {
+            background: linear-gradient(90deg, #1e3a8a, #2d6a4f);
+            color: white;
+            border-radius: 10px;
+            padding: 16px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .welcome h2 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+        .welcome p { margin: 4px 0 0; opacity: 0.9; font-size: 0.82rem; }
+        .welcome-actions { display: flex; gap: 8px; }
+        .welcome-actions a {
+            background: white;
+            color: var(--primary-dark);
+            padding: 7px 14px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .welcome-actions a.secondary { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); }
+
+        /* Stats grid */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .stat-card {
+            background: transparent;
+            border: none;
+            border-right: 1px solid #9ca3af;
+            border-radius: 0;
+            padding: 14px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            box-shadow: none;
+        }
+        .stat-card:last-child { border-right: none; }
+        .stat-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+        }
+        .stat-icon svg { width: 20px; height: 20px; fill: white; }
+        .stat-icon.green { background: #2d6a4f; }
+        .stat-icon.orange { background: #f59e0b; }
+        .stat-icon.red { background: #ef4444; }
+        .stat-icon.blue { background: #3b82f6; }
+        .stat-info h3 { margin: 0; font-size: 1.3rem; color: var(--text); }
+        .stat-info span { color: var(--text-muted); font-size: 0.78rem; }
+        .stat-badge {
+            font-size: 0.68rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 4px;
+            display: inline-block;
+        }
+        .badge-warn { background: #fef3c7; color: #92400e; }
+        .badge-ok { background: #d1fae5; color: #065f46; }
+
+        /* Quick actions */
+        .section-title {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--text);
+            margin: 0 0 10px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .quick-action {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+            text-decoration: none;
+            color: var(--text);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .quick-action svg { width: 22px; height: 22px; stroke: var(--primary); margin-bottom: 6px; }
+        .quick-action strong { display: block; font-size: 0.82rem; margin-bottom: 3px; }
+        .quick-action small { color: var(--text-muted); font-size: 0.7rem; }
+        .quick-action:hover { border-color: var(--primary); }
+
+        /* Two column */
+        .row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .panel h3 { margin: 0; font-size: 0.9rem; }
+        .view-all { color: var(--primary); text-decoration: none; font-size: 0.78rem; font-weight: 600; }
+        .view-all:hover { text-decoration: underline; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; color: var(--text-muted); font-size: 0.7rem; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; }
+        td { padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #f8fafc; }
+        .muted { color: var(--text-muted); }
+        .action-btn {
+            background: #eff6ff;
+            color: var(--blue);
+            border: none;
+            border-radius: 5px;
+            width: 26px;
+            height: 26px;
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+        }
+
+        .schedule { min-height: 160px; display: grid; place-items: center; text-align: center; }
+        .schedule svg { width: 36px; height: 36px; stroke: var(--text-muted); margin-bottom: 6px; }
+        .schedule p { margin: 0; color: var(--text-muted); font-size: 0.82rem; }
+
+        /* Modules */
+        .modules {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+        }
+        .module {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            text-decoration: none;
+            color: var(--text);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .module svg { width: 22px; height: 22px; margin-bottom: 6px; }
+        .module span { display: block; font-size: 0.78rem; font-weight: 600; }
+        .module:hover { border-color: var(--primary); }
+
+        @media (max-width: 1100px) {
+            .sidebar { width: 200px; }
+            .main { margin-left: 200px; }
+        }
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; }
+            .row { grid-template-columns: 1fr; }
+            .welcome { flex-direction: column; align-items: flex-start; gap: 14px; }
+        }
+        hr { border: none; border-top: 1px solid #9ca3af; margin: 12px 0; }
+    </style>
+{% endblock %}
+
+{% block content %}
+        <section class="welcome">
+            <div>
+                <h2>Welcome back, {{ request.user.username|default:"Admin User" }}</h2>
+                <p>Manage your farm operations, track expenses, view reports, and monitor crop seasons.</p>
+            </div>
+            <div class="welcome-actions">
+                <a href="javascript:void(0)" onclick="openModal('/dashboard/accounts/farmprofile/new/', 'New Farm')">+ New Farm</a>
+                <a class="secondary" href="javascript:void(0)" onclick="openModal('/dashboard/expenses/expense/new/', 'New Expense')">+ New Expense</a>
+            </div>
+        </section>
+        <hr>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-icon green">
+                    <svg viewBox="0 0 24 24" fill="white"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ farm_count }}</h3>
+                    <span>Farms</span>
+                    <div class="stat-badge badge-ok">{{ field_count }} Fields</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon orange">
+                    <svg viewBox="0 0 24 24" fill="white"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ crop_count }}</h3>
+                    <span>Crop Seasons</span>
+                    <div class="stat-badge badge-warn">{{ task_count }} open tasks</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon red">
+                    <svg viewBox="0 0 24 24" fill="white"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ expense_total|default:"0.00"|as_currency:currency }}</h3>
+                    <span>Total Expenses</span>
+                    <div class="stat-badge badge-warn">{{ recent_expenses|length }} recent</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon blue">
+                    <svg viewBox="0 0 24 24" fill="white"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ revenue_total|default:"0.00"|as_currency:currency }}</h3>
+                    <span>Revenue</span>
+                    <div class="stat-badge badge-ok">Harvest records</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green">
+                    <svg viewBox="0 0 24 24" fill="white"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ equipment_count }}</h3>
+                    <span>Equipment</span>
+                    <div class="stat-badge badge-warn">{{ maintenance_count }} maintenance</div>
+                </div>
+            </div>
+        </div>
+        <hr>
+
+        <h3 class="section-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            Quick Actions
+        </h3>
+        <div class="quick-actions">
+            <a class="quick-action" href="javascript:void(0)" onclick="openModal('/dashboard/accounts/farmprofile/new/', 'New Farm')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                <strong>New Farm</strong>
+                <small>Add a farm profile</small>
+            </a>
+            <a class="quick-action" href="/dashboard/fields/field/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                <strong>Find Field</strong>
+                <small>Search field records</small>
+            </a>
+            <a class="quick-action" href="javascript:void(0)" onclick="openModal('/dashboard/crops/cropseason/new/', 'New Season')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <strong>New Season</strong>
+                <small>Start a crop season</small>
+            </a>
+            <a class="quick-action" href="javascript:void(0)" onclick="openModal('/dashboard/expenses/expense/new/', 'New Expense')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                <strong>New Expense</strong>
+                <small>Record a purchase</small>
+            </a>
+            <a class="quick-action" href="javascript:void(0)" onclick="openModal('/dashboard/labor/task/new/', 'New Task')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+                <strong>New Task</strong>
+                <small>Assign work to crew</small>
+            </a>
+            <a class="quick-action" href="javascript:void(0)" onclick="openModal('/dashboard/equipment/maintenancelog/new/', 'Maintenance Log')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                <strong>Maintenance</strong>
+                <small>Log equipment service</small>
+            </a>
+        </div>
+
+        <div class="row">
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Recent Expenses</h3>
+                    <a class="view-all" href="/dashboard/expenses/expense/">View All &rarr;</a>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Category</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in recent_expenses %}
+                        <tr>
+                            <td>EX-{{ expense.id }}</td>
+                            <td>{{ expense.category.name }}</td>
+                            <td>{{ expense.amount|as_currency:currency }}</td>
+                            <td class="muted">{{ expense.date }}</td>
+                            <td><a href="javascript:void(0)" onclick="openModal('/dashboard/expenses/expense/{{ expense.id }}/edit/', 'Edit Expense')" class="action-btn" title="Edit">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </a></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="muted" style="text-align:center;">No expenses recorded yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Recent Crop Seasons</h3>
+                    <a class="view-all" href="/dashboard/crops/cropseason/">All &rarr;</a>
+                </div>
+                <div class="schedule">
+                    {% if recent_crops %}
+                    <table>
+                        <thead>
+                            <tr><th>Crop</th><th>Field</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for crop in recent_crops %}
+                            <tr>
+                                <td>{{ crop.crop.name }}</td>
+                                <td class="muted">{{ crop.field.name|default:"--" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <p>No crop seasons created yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <h3 class="section-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Modules
+        </h3>
+        <div class="modules">
+            <a class="module" href="/dashboard/accounts/farmprofile/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#2d6a4f" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                <span>Farms</span>
+            </a>
+            <a class="module" href="/dashboard/fields/field/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#2d6a4f" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                <span>Fields</span>
+            </a>
+            <a class="module" href="/dashboard/crops/cropseason/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+                <span>Crops</span>
+            </a>
+            <a class="module" href="/dashboard/expenses/expense/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                <span>Expenses</span>
+            </a>
+            <a class="module" href="/dashboard/equipment/equipment/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg>
+                <span>Equipment</span>
+            </a>
+            <a class="module" href="/dashboard/inventory/inventoryitem/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#2d6a4f" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                <span>Inventory</span>
+            </a>
+            <a class="module" href="/dashboard/labor/worker/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                <span>Workers</span>
+            </a>
+            <a class="module" href="/reports/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#2d6a4f" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-2-2-4 4"/></svg>
+                <span>Reports</span>
+            </a>
+            <a class="module" href="/dashboard/budgets/budget/">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+                <span>Budgets</span>
+            </a>
+        </div>
+{% endblock %}

@@ -1,0 +1,104 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ model_name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}{{ model_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .stats-grid .stat-mini {
+        background: transparent;
+        border: none;
+        border-right: 1px solid #9ca3af;
+        border-radius: 0;
+        padding: 10px 14px;
+        box-shadow: none;
+    }
+    .stats-grid .stat-mini:last-child { border-right: none; }
+    hr { border: none; border-top: 1px solid #9ca3af; margin: 12px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <h2 style="margin:0; color:var(--primary-dark); font-size:1.05rem;">{{ model_name|title }}</h2>
+    <button class="btn btn-primary" onclick="openModal('{{ urls.create }}', 'New {{ model_name }}')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Add New
+    </button>
+</div>
+
+{% if stats %}
+<hr>
+<div class="stats-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px;">
+    {% for stat in stats %}
+    <div class="stat-mini">
+        <div style="font-size:1.1rem; font-weight:700; color:var(--primary-dark);">{{ stat.value }}</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em; margin-top:2px;">{{ stat.label }}</div>
+    </div>
+    {% endfor %}
+</div>
+    <hr>
+{% endif %}
+
+<div class="panel">
+    <form class="search-bar" method="get">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search {{ model_name }}...">
+        <button type="submit" class="btn btn-secondary">Search</button>
+        {% if q %}<a href="?" class="btn btn-secondary">Clear</a>{% endif %}
+    </form>
+
+    {% if rows %}
+    <table data-no-filter>
+        <thead>
+            <tr>
+                {% for name in display_field_names %}
+                <th>{{ name|title }}</th>
+                {% endfor %}
+                <th style="text-align:right;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                {% for cell in row.cells %}
+                <td>{{ cell }}</td>
+                {% endfor %}
+                <td style="text-align:right; white-space:nowrap;">
+                    {% if detail_url_name %}
+                    <a class="action-btn" href="{% url detail_url_name pk=row.pk %}" style="background:#f0fdf4; color:var(--primary);">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        View
+                    </a>
+                    {% endif %}
+                    <a class="action-btn edit" onclick="openModal('{% url 'model_update' app=app model=model pk=row.pk %}', 'Edit {{ model_name }}')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </a>
+                    <a class="action-btn delete" onclick="openModal('{% url 'model_delete' app=app model=model pk=row.pk %}', 'Delete {{ model_name }}')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        Delete
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        <p>No {{ model_name }} found. Click "Add New" to create one.</p>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% if q %}&q={{ q }}{% endif %}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if q %}&q={{ q }}{% endif %}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

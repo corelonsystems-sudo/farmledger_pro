@@ -1,0 +1,50 @@
+{% extends "reports/report_base.html" %}
+{% block content %}
+<h1>Profit &amp; Loss Statement</h1>
+<div class="filters">
+    <form method="get">
+        <label>Crop Season:</label>
+        <select name="crop_season">
+            <option value="">All</option>
+        </select>
+        <label>From:</label>
+        <input type="date" name="start_date" value="{{ start_date|default:'' }}">
+        <label>To:</label>
+        <input type="date" name="end_date" value="{{ end_date|default:'' }}">
+        <button type="submit">Filter</button>
+    </form>
+</div>
+<div class="export-links">
+    <a href="?export=pdf{% if crop_season_id %}&crop_season={{ crop_season_id }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export PDF</a>
+    <a href="?export=csv{% if crop_season_id %}&crop_season={{ crop_season_id }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export CSV</a>
+</div>
+
+<h2>Income</h2>
+<table>
+    <tr><th>Description</th><th style="text-align:right">Amount</th></tr>
+    {% for item in income_items %}
+    <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+    {% empty %}
+    <tr><td colspan="2">No income records found.</td></tr>
+    {% endfor %}
+    <tr class="total-row"><td>Total Income</td><td style="text-align:right">{{ total_income|as_currency:currency }}</td></tr>
+</table>
+
+<h2>Expenses</h2>
+<table>
+    <tr><th>Category</th><th style="text-align:right">Amount</th></tr>
+    {% for item in expense_items %}
+    <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+    {% empty %}
+    <tr><td colspan="2">No expense records found.</td></tr>
+    {% endfor %}
+    <tr class="total-row"><td>Total Expenses</td><td style="text-align:right">{{ total_expenses|as_currency:currency }}</td></tr>
+</table>
+
+<table>
+    <tr class="total-row">
+        <td>Net Profit</td>
+        <td style="text-align:right" class="{% if net_profit >= 0 %}positive{% else %}negative{% endif %}">{{ net_profit|as_currency:currency }}</td>
+    </tr>
+</table>
+{% endblock %}

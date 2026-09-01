@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FarmLedger Pro{% endblock %}</title>
+    <style>
+        :root {
+            --primary: #2d6a4f;
+            --primary-dark: #1b4332;
+            --primary-light: #40916c;
+            --bg: #f1f5f9;
+            --surface: #ffffff;
+            --text: #1f2937;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #f59e0b;
+            --red: #ef4444;
+            --blue: #3b82f6;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 220px;
+            background: linear-gradient(180deg, var(--primary-dark), var(--primary));
+            color: white;
+            display: flex;
+            flex-direction: column;
+            padding: 16px 12px;
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            overflow-y: auto;
+        }
+        .brand {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 1.1rem; font-weight: 700;
+            margin-bottom: 20px; padding-left: 6px;
+            text-decoration: none; color: white;
+        }
+        .brand svg { width: 24px; height: 24px; }
+        .user-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 12px;
+            text-align: center; margin-bottom: 16px;
+        }
+        .user-avatar {
+            width: 44px; height: 44px; background: white;
+            color: var(--primary); border-radius: 50%;
+            display: grid; place-items: center;
+            margin: 0 auto 6px; font-size: 1.2rem; font-weight: 700;
+        }
+        .user-card p { margin: 2px 0; font-size: 0.85rem; }
+        .user-card .role { font-size: 0.72rem; opacity: 0.85; }
+        .nav { list-style: none; margin: 0; padding: 0; }
+        .nav li a {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 8px; color: rgba(255,255,255,0.9);
+            text-decoration: none; border-radius: 6px;
+            margin-bottom: 2px; font-size: 0.85rem;
+        }
+        .nav li a:hover, .nav li a.active { background: rgba(255,255,255,0.15); color: white; }
+        .nav li a svg { width: 18px; height: 18px; opacity: 0.9; }
+        .nav-group { margin-bottom: 2px; }
+        .nav-group > summary {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 8px; border-radius: 6px; cursor: pointer;
+            font-size: 0.85rem; color: rgba(255,255,255,0.9);
+            list-style: none; user-select: none;
+        }
+        .nav-group > summary::-webkit-details-marker { display: none; }
+        .nav-group > summary:hover { background: rgba(255,255,255,0.15); color: white; }
+        .nav-group > summary svg.group-icon { width: 18px; height: 18px; opacity: 0.9; }
+        .nav-group > summary .chevron {
+            margin-left: auto; width: 14px; height: 14px; opacity: 0.7;
+            transition: transform 0.15s ease;
+        }
+        .nav-group[open] > summary { background: rgba(255,255,255,0.1); color: white; }
+        .nav-group[open] > summary .chevron { transform: rotate(90deg); }
+        .nav-group ul { list-style: none; margin: 2px 0 6px; padding: 0 0 0 14px; }
+        .nav-group ul li a { font-size: 0.8rem; padding: 6px 8px; }
+        .nav-group ul li a svg { width: 15px; height: 15px; }
+        .main {
+            flex: 1; margin-left: 220px;
+            padding: 16px 24px; min-height: 100vh;
+        }
+        .topbar {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 16px;
+        }
+        .topbar .breadcrumbs { font-size: 1.1rem; font-weight: 700; color: var(--primary-dark); }
+        .topbar .meta { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 0.82rem; }
+        .pill {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 16px; padding: 4px 12px;
+            display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem;
+        }
+        .panel {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 7px 14px; border-radius: 6px;
+            text-decoration: none; font-size: 0.8rem; font-weight: 600;
+            border: none; cursor: pointer;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-danger { background: var(--red); color: white; }
+        .btn-secondary { background: #e2e8f0; color: var(--text); }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; color: var(--text-muted); font-size: 0.7rem; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; }
+        td { padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #f8fafc; }
+        .muted { color: var(--text-muted); }
+        .action-btn {
+            background: #eff6ff; color: var(--blue); border: none;
+            border-radius: 5px; padding: 4px 8px; cursor: pointer;
+            text-decoration: none; display: inline-flex; align-items: center; gap: 3px;
+            font-size: 0.72rem;
+        }
+        .action-btn.edit { background: #eff6ff; color: var(--blue); }
+        .action-btn.delete { background: #fef2f2; color: var(--red); }
+        .search-bar {
+            display: flex; gap: 8px; margin-bottom: 10px;
+        }
+        .search-bar input[type="text"] {
+            flex: 1; padding: 7px 12px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.82rem;
+        }
+        .pagination { display: flex; gap: 6px; margin-top: 12px; justify-content: center; }
+        .pagination a, .pagination span {
+            padding: 4px 10px; border: 1px solid var(--border);
+            border-radius: 5px; text-decoration: none; color: var(--text);
+            font-size: 0.78rem;
+        }
+        .pagination .current { background: var(--primary); color: white; border-color: var(--primary); }
+
+        /* Modal */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.5);
+            z-index: 1000; justify-content: center; align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: white; border-radius: 10px; padding: 20px;
+            width: 60%; max-width: 900px; max-height: 88vh; overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .modal-header h2 { margin: 0; font-size: 1.05rem; color: var(--primary-dark); }
+        .modal-close { background: none; border: none; font-size: 1.3rem; cursor: pointer; color: var(--text-muted); }
+        .modal-body iframe { width: 100%; border: none; min-height: 340px; }
+
+        /* Forms */
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-weight: 600; font-size: 0.78rem; margin-bottom: 4px; color: var(--text); }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 7px 10px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.82rem; font-family: inherit;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: var(--primary);
+        }
+        .form-group .help { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; }
+        .form-group .error { font-size: 0.7rem; color: var(--red); margin-top: 3px; }
+        .form-group .errorlist { list-style: none; padding: 0; margin: 3px 0 0; }
+        .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+        .empty-state { text-align: center; padding: 28px; color: var(--text-muted); }
+        .empty-state svg { width: 40px; height: 40px; margin-bottom: 8px; }
+
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; }
+        }
+    .table-filter {
+        width: 100%;
+        max-width: 320px;
+        margin-bottom: 12px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.85rem;
+        background: var(--surface);
+        color: var(--text);
+    }
+    .table-filter:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+    tbody tr.filter-hidden { display: none; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    {% block sidebar %}
+    <aside class="sidebar">
+        <a class="brand" href="/">
+            <svg viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            FarmLedger Pro
+        </a>
+        <div class="user-card">
+            <div class="user-avatar">{{ request.user.username|first|upper|default:"A" }}</div>
+            <p><strong>{{ request.user.username|default:"Admin User" }}</strong></p>
+            <p class="role">System Administrator</p>
+        </div>
+        <ul class="nav">
+            <li><a href="/" class="{% block nav_dashboard %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Dashboard</a></li>
+
+            <li>
+                <details class="nav-group">
+                    <summary>
+                        <svg class="group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+                        Crops
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </summary>
+                    <ul>
+                        <li><a href="{% url 'model_list' app='crops' model='crop' %}" class="{% block nav_crops %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg> Crops</a></li>
+                        <li><a href="{% url 'model_list' app='crops' model='cropseason' %}" class="{% block nav_cropseasons %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5M9 21V11M15 21V11"/></svg> Crop Seasons</a></li>
+                        <li><a href="{% url 'model_list' app='crops' model='harvestrecord' %}" class="{% block nav_harvests %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/><path d="M7 12h4l-2 4h4l-2 4"/></svg> Harvests</a></li>
+                        <li><a href="{% url 'model_list' app='crops' model='processingstage' %}" class="{% block nav_processing %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.6.63 1.05 1.24 1.11"/></svg> Processing</a></li>
+                        <li><a href="{% url 'model_list' app='crops' model='sale' %}" class="{% block nav_sales %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> Sales</a></li>
+                        <li><a href="{% url 'model_list' app='crops' model='sale' %}?waste=1" class="{% block nav_waste %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M9 13l6-6"/><path d="M15 13l-6-6"/></svg> Waste Management</a></li>
+                    </ul>
+                </details>
+            </li>
+
+            <li>
+                <details class="nav-group">
+                    <summary>
+                        <svg class="group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 7l-5 5v8h12v-8l-5-5"/><path d="M11 7V3h2v4"/></svg>
+                        Animals
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </summary>
+                    <ul>
+                        <li><a href="{% url 'model_list' app='livestock' model='animalspecies' %}" class="{% block nav_livestock %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 7l-5 5v8h12v-8l-5-5"/><path d="M11 7V3h2v4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/></svg> Livestock</a></li>
+                        <li><a href="{% url 'model_list' app='livestock' model='poultrybatch' %}" class="{% block nav_poultry %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8 2 6 6 6 10c0 2 1 3 2 4v6h8v-6c1-1 2-2 2-4 0-4-2-8-6-8z"/><circle cx="10" cy="9" r="1"/><path d="M12 2v4"/></svg> Poultry</a></li>
+                    </ul>
+                </details>
+            </li>
+
+            <li>
+                <details class="nav-group">
+                    <summary>
+                        <svg class="group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                        Operations
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </summary>
+                    <ul>
+                        <li><a href="{% url 'model_list' app='fields' model='field' %}" class="{% block nav_fields %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg> Fields</a></li>
+                        <li><a href="{% url 'model_list' app='equipment' model='equipment' %}" class="{% block nav_equipment %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg> Equipment</a></li>
+                        <li><a href="{% url 'model_list' app='inventory' model='inventoryitem' %}" class="{% block nav_inventory %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Inventory</a></li>
+                        <li><a href="{% url 'model_list' app='labor' model='worker' %}" class="{% block nav_workers %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> Workers</a></li>
+                    </ul>
+                </details>
+            </li>
+
+            <li>
+                <details class="nav-group">
+                    <summary>
+                        <svg class="group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                        Finance
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </summary>
+                    <ul>
+                        <li><a href="{% url 'model_list' app='expenses' model='expense' %}" class="{% block nav_expenses %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> Expenses</a></li>
+                        <li><a href="{% url 'model_list' app='expenses' model='category' %}" class="{% block nav_codes %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg> Budget Codes</a></li>
+                        <li><a href="{% url 'model_list' app='budgets' model='budget' %}" class="{% block nav_budgets %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg> Budgets</a></li>
+                        <li><a href="{% url 'model_list' app='integrations' model='bankaccount' %}" class="{% block nav_integrations %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg> Integrations</a></li>
+                    </ul>
+                </details>
+            </li>
+
+            <li><a href="/reports/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-2-2-4 4"/></svg> Reports</a></li>
+
+            <li>
+                <details class="nav-group">
+                    <summary>
+                        <svg class="group-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.6.63 1.05 1.24 1.11"/></svg>
+                        Settings
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </summary>
+                    <ul>
+                        <li><a href="{% url 'model_list' app='accounts' model='farmprofile' %}" class="{% block nav_farms %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Farm Profiles</a></li>
+                    </ul>
+                </details>
+            </li>
+        </ul>
+    </aside>
+    {% endblock %}
+
+    <main class="main">
+        <div class="topbar">
+            <div class="breadcrumbs">{% block breadcrumbs %}Dashboard{% endblock %}</div>
+            <div class="meta">
+                <form method="post" action="{% url 'set_currency' %}" style="display:inline-flex; margin:0;">
+                    {% csrf_token %}
+                    <select name="currency" class="pill" onchange="this.form.submit()" title="Display currency" style="padding:4px 8px; border-radius:16px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:0.78rem; cursor:pointer;">
+                        {% for c in currencies %}
+                        <option value="{{ c.pk }}" {% if c.pk == currency.pk %}selected{% endif %}>{{ c.code }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="hidden" name="next" value="{{ request.path }}">
+                </form>
+                <span class="pill">{{ request.user.username|default:"Admin" }}</span>
+            </div>
+        </div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Modal for popup forms -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modalTitle">Form</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        // Open the sidebar group that contains the active link, or the one the
+        // user last expanded.
+        (function() {
+            var groups = document.querySelectorAll('.nav-group');
+            var opened = false;
+            groups.forEach(function(group, index) {
+                if (group.querySelector('a.active')) {
+                    group.open = true;
+                    opened = true;
+                }
+                group.addEventListener('toggle', function() {
+                    if (group.open) {
+                        try { localStorage.setItem('sidebarGroup', String(index)); } catch (e) {}
+                    }
+                });
+            });
+            if (!opened) {
+                var stored = null;
+                try { stored = localStorage.getItem('sidebarGroup'); } catch (e) {}
+                if (stored !== null && groups[stored]) groups[stored].open = true;
+            }
+        })();
+
+        function openModal(url, title) {
+            document.getElementById('modalTitle').textContent = title || 'Form';
+            var sep = url.indexOf('?') > -1 ? '&' : '?';
+            document.getElementById('modalBody').innerHTML =
+                '<iframe src="' + url + sep + 'modal=1" frameborder="0" id="modalFrame"></iframe>';
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('active');
+            document.getElementById('modalBody').innerHTML = '';
+        }
+        document.addEventListener('click', function(e) {
+            if (e.target.id === 'modalOverlay') closeModal();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeModal();
+        });
+        // Handle form submission from inside iframe
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.redirect) {
+                closeModal();
+                window.location.href = e.data.redirect;
+            }
+        });
+    // Add a client-side filter to every table without data-no-filter
+    document.querySelectorAll('table:not([data-no-filter])').forEach(function(table) {
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'table-filter';
+        input.placeholder = 'Filter this table...';
+        input.setAttribute('aria-label', 'Filter table');
+        input.addEventListener('input', function() {
+            var term = this.value.toLowerCase();
+            table.querySelectorAll('tbody tr').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().indexOf(term) > -1 ? '' : 'none';
+            });
+        });
+        table.parentNode.insertBefore(input, table);
+    });
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

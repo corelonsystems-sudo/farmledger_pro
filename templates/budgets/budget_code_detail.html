@@ -1,0 +1,221 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ code.name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Budget Codes &rsaquo; {{ code.name }}{% endblock %}
+{% block nav_codes %}active{% endblock %}
+
+{% block extra_head %}
+<style>
+    .code-header {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    @media (max-width: 700px) {
+        .code-header { grid-template-columns: 1fr; }
+    }
+    .summary-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .summary-card h3 {
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .label { color: var(--text-muted); }
+    .summary-row .value { font-weight: 700; color: var(--text); }
+    .summary-row .value.red { color: var(--red); }
+
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e2e8f0;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 4px;
+    }
+    .progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+    }
+    .progress-fill.normal { background: var(--primary); }
+    .progress-fill.warning { background: var(--accent); }
+    .progress-fill.over { background: var(--red); }
+
+    .item-table td { vertical-align: middle; }
+    .item-name { font-weight: 600; }
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .pct-cell { width: 120px; }
+    .over-budget-tag {
+        display: inline-block;
+        background: #fef2f2;
+        color: var(--red);
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: 6px;
+        text-transform: uppercase;
+    }
+    .code-badge {
+        display: inline-block;
+        background: var(--primary);
+        color: white;
+        font-size: 1.1rem;
+        font-weight: 800;
+        padding: 4px 14px;
+        border-radius: 8px;
+        letter-spacing: 0.05em;
+    }
+    .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .empty-state { text-align: center; padding: 28px; color: var(--text-muted); }
+    .empty-state svg { width: 40px; height: 40px; margin-bottom: 8px; }
+    .btn-add {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: var(--primary); color: white; border: none;
+        border-radius: 6px; padding: 7px 14px; font-size: 0.8rem;
+        text-decoration: none; cursor: pointer; margin-bottom: 12px;
+    }
+    .btn-add:hover { background: var(--primary-dark); }
+    .action-btn {
+        background: #eff6ff; color: var(--blue); border: none;
+        border-radius: 5px; padding: 4px 8px; cursor: pointer;
+        text-decoration: none; display: inline-flex; align-items: center; gap: 3px;
+        font-size: 0.72rem;
+    }
+    .action-btn.edit { background: #eff6ff; color: var(--blue); }
+    .action-btn.delete { background: #fef2f2; color: var(--red); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:18px;">
+    <span class="code-badge">{{ code.code|default:"—" }}</span>
+    <div>
+        <h2 style="margin:0; font-size:1.3rem; color:var(--primary-dark);">{{ code.name }}</h2>
+        <p style="margin:2px 0 0; font-size:0.8rem; color:var(--text-muted);">{{ code.get_schedule_f_line_display }}</p>
+    </div>
+</div>
+
+<div class="code-header">
+    <div class="summary-card">
+        <h3>Code Info</h3>
+        <div class="summary-row">
+            <span class="label">Code</span>
+            <span class="value">{{ code.code|default:"—" }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Name</span>
+            <span class="value">{{ code.name }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Schedule F Line</span>
+            <span class="value">{{ code.get_schedule_f_line_display }}</span>
+        </div>
+        {% if code.description %}
+        <div class="summary-row">
+            <span class="label">Description</span>
+            <span class="value" style="font-weight:400; font-size:0.8rem;">{{ code.description }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="summary-card">
+        <h3>Fund Summary</h3>
+        <div class="summary-row">
+            <span class="label">Total Fund Pool</span>
+            <span class="value">{{ total_fund|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Total Planned</span>
+            <span class="value">{{ total_planned|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Total Spent</span>
+            <span class="value">{{ total_spent|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Remaining</span>
+            <span class="value {% if total_remaining < 0 %}red{% endif %}">{{ total_remaining|as_currency:currency }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <h3 style="margin:0 0 10px; font-size:0.9rem; color:var(--primary-dark);">Budget Items Using This Code</h3>
+    {% if item_data %}
+    <table class="item-table" style="width:100%; border-collapse:collapse;">
+        <thead>
+            <tr>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Budget</th>
+                <th style="text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Crop Season</th>
+                <th class="amount-cell" style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Fund</th>
+                <th class="amount-cell" style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Planned</th>
+                <th class="amount-cell" style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Spent</th>
+                <th class="amount-cell" style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Remaining</th>
+                <th class="pct-cell" style="padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Progress</th>
+                <th style="text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in item_data %}
+            <tr>
+                <td style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem;">
+                    <a href="{% url 'budget_detail' pk=row.item.budget.pk %}" style="color:var(--blue); text-decoration:none; font-weight:600;">{{ row.item.budget.name }}</a>
+                </td>
+                <td style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem;">{{ row.item.crop_season|default:"-" }}</td>
+                <td class="amount-cell" style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem; text-align:right; font-variant-numeric:tabular-nums;">{{ row.fund_amount|as_currency:currency }}</td>
+                <td class="amount-cell" style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem; text-align:right; font-variant-numeric:tabular-nums;">{{ row.item.planned_amount|as_currency:currency }}</td>
+                <td class="amount-cell" style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem; text-align:right; font-variant-numeric:tabular-nums;">{{ row.spent|as_currency:currency }}</td>
+                <td class="amount-cell" style="padding:8px; border-bottom:1px solid var(--border); font-size:0.82rem; text-align:right; font-variant-numeric:tabular-nums; {% if row.remaining < 0 %}color:var(--red);{% endif %}">{{ row.remaining|as_currency:currency }}</td>
+                <td class="pct-cell" style="padding:8px; border-bottom:1px solid var(--border); width:120px;">
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:2px;">{{ row.pct }}%</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill {% if row.over_budget %}over{% elif row.pct > 80 %}warning{% else %}normal{% endif %}"
+                             style="width: {% if row.pct > 100 %}100{% else %}{{ row.pct }}{% endif %}%;"></div>
+                    </div>
+                </td>
+                <td style="padding:8px; border-bottom:1px solid var(--border); text-align:right; white-space:nowrap;">
+                    <a class="action-btn edit" onclick="openModal('{% url 'model_update' app='budgets' model='budgetitem' pk=row.item.pk %}', 'Edit Budget Item')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </a>
+                    <a class="action-btn delete" onclick="openModal('{% url 'model_delete' app='budgets' model='budgetitem' pk=row.item.pk %}', 'Delete Budget Item')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        Delete
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <p>No budget items using this code yet.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

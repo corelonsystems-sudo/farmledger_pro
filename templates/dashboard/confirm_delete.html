@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delete {{ model_name }}</title>
+    <style>
+        :root {
+            --primary: #2d6a4f;
+            --text: #1f2937;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --red: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; color: var(--text); background: white; padding: 20px; }
+        h2 { margin: 0 0 16px; color: var(--red); font-size: 1.1rem; }
+        p { margin: 0 0 20px; line-height: 1.5; }
+        .warning-box { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px; margin-bottom: 20px; }
+        .warning-box strong { color: var(--red); }
+        .form-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+        .btn-danger { background: var(--red); color: white; }
+        .btn-cancel { background: #e2e8f0; color: var(--text); }
+    </style>
+</head>
+<body>
+    <h2>Delete {{ model_name }}</h2>
+    <div class="warning-box">
+        <strong>Warning:</strong> Are you sure you want to delete "{{ obj }}"?
+        <br>This action cannot be undone.
+    </div>
+    <form method="post" id="deleteForm">
+        {% csrf_token %}
+        <div class="form-actions">
+            <button type="button" class="btn btn-cancel" onclick="window.parent.postMessage({close: true}, '*')">Cancel</button>
+            <button type="submit" class="btn btn-danger" id="confirmBtn">Yes, Delete</button>
+        </div>
+    </form>
+    <script>
+        var form = document.getElementById('deleteForm');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = document.getElementById('confirmBtn');
+            btn.innerHTML = 'Deleting...';
+            btn.disabled = true;
+
+            var formData = new FormData(form);
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            .then(function(resp) {
+                // Delete view does a redirect on success - follow it
+                if (resp.redirected) {
+                    window.parent.postMessage({redirect: resp.url}, '*');
+                } else {
+                    return resp.text().then(function(html) {
+                        document.open();
+                        document.write(html);
+                        document.close();
+                    });
+                }
+            })
+            .catch(function(err) {
+                btn.innerHTML = 'Yes, Delete';
+                btn.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>

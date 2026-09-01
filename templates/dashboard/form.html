@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ action }} {{ model_name }}</title>
+    <style>
+        :root {
+            --primary: #2d6a4f;
+            --primary-dark: #1b4332;
+            --text: #1f2937;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --red: #ef4444;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; color: var(--text); background: white; padding: 14px; }
+        h2 { margin: 0 0 14px; color: var(--primary-dark); font-size: 1rem; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-weight: 600; font-size: 0.78rem; margin-bottom: 4px; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 7px 10px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.82rem; font-family: inherit;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: var(--primary);
+        }
+        .form-group .help { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; }
+        .form-group ul.errorlist { list-style: none; padding: 0; margin: 3px 0 0; }
+        .form-group ul.errorlist li { font-size: 0.7rem; color: var(--red); }
+        .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .btn { padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-cancel { background: #e2e8f0; color: var(--text); }
+        .alert { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.8rem; display: none; }
+        .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--red); }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e2e8f0; border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="alert alert-error" id="alertBox"></div>
+    <h2>{{ action }} {{ model_name }}</h2>
+    {% if waste and obj %}<p style="margin:-8px 0 14px; font-size:0.85rem; color:var(--text-muted);">{{ obj }}</p>{% endif %}
+    <form method="post" enctype="multipart/form-data" id="crudForm">
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+            {% if field.errors %}<ul class="errorlist">{% for e in field.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="button" class="btn btn-cancel" onclick="window.parent.postMessage({close: true}, '*')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="submitBtn">{{ action }} {{ model_name }}</button>
+        </div>
+    </form>
+    <script>
+        // Sale form: keep the processing stage list in sync with the chosen harvest
+        // and default to the latest stage of that harvest.
+        (function() {
+            var harvestSelect = document.getElementById('id_harvest');
+            var stageSelect = document.getElementById('id_processing_stage');
+            if (!harvestSelect || !stageSelect) return;
+            var allOptions = Array.prototype.slice.call(stageSelect.options);
+            harvestSelect.addEventListener('change', function() {
+                var harvestId = harvestSelect.value;
+                stageSelect.innerHTML = '';
+                var matching = [];
+                allOptions.forEach(function(opt) {
+                    var owner = opt.getAttribute('data-harvest');
+                    if (!owner) {
+                        stageSelect.appendChild(opt.cloneNode(true));
+                    } else if (owner === harvestId) {
+                        var clone = opt.cloneNode(true);
+                        stageSelect.appendChild(clone);
+                        matching.push(clone);
+                    }
+                });
+                if (matching.length) {
+                    stageSelect.value = matching[matching.length - 1].value;
+                }
+            });
+        })();
+
+        var form = document.getElementById('crudForm');
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = document.getElementById('submitBtn');
+            btn.innerHTML = '<span class="spinner"></span> Saving...';
+            btn.disabled = true;
+
+            var formData = new FormData(form);
+            fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
+            .then(function(resp) {
+                if (resp.headers.get('content-type', '').includes('application/json')) {
+                    return resp.json().then(function(data) {
+                        if (data.ok) {
+                            window.parent.postMessage({redirect: data.redirect}, '*');
+                        } else {
+                            throw new Error('Unexpected response');
+                        }
+                    });
+                } else {
+                    // Server returned HTML (likely form with errors) - replace page content
+                    return resp.text().then(function(html) {
+                        document.open();
+                        document.write(html);
+                        document.close();
+                    });
+                }
+            })
+            .catch(function(err) {
+                var alert = document.getElementById('alertBox');
+                alert.textContent = 'An error occurred. Please try again.';
+                alert.style.display = 'block';
+                btn.innerHTML = '{{ action }} {{ model_name }}';
+                btn.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>

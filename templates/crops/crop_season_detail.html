@@ -1,0 +1,475 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ crop.name }} - {{ season }}{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a> &rsaquo; {{ season }}{% endblock %}
+{% block extra_head %}
+<style>
+    .budget-header {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    @media (max-width: 900px) {
+        .budget-header { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+        .budget-header { grid-template-columns: 1fr; }
+    }
+    .summary-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .summary-card h3 {
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .label { color: var(--text-muted); }
+    .summary-row .value { font-weight: 700; color: var(--text); }
+    .summary-row .value.green { color: var(--primary); }
+    .summary-row .value.red { color: var(--red); }
+    .status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .status-badge.active { background: #d1fae5; color: #065f46; }
+    .item-table td { vertical-align: middle; }
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 22px;
+        margin-bottom: 18px;
+    }
+    .profile-identity { display: flex; align-items: center; gap: 16px; }
+    .avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .profile-name h1 { margin: 0 0 6px; font-size: 1.35rem; color: var(--primary-dark); }
+    .profile-meta { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
+    .profile-meta a { color: var(--primary); text-decoration: none; }
+    .id-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .profile-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 20px;
+    }
+    .crop-tab {
+        padding: 10px 18px;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    .crop-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .profile-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+    }
+    .profile-card h3 {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin: 0 0 14px;
+        color: var(--primary-dark);
+        font-weight: 700;
+    }
+    .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin-bottom: 14px;
+    }
+    .section-head h3 {
+        border: none;
+        padding: 0;
+        margin: 0;
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .row-actions a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.72rem;
+        padding: 3px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+    .row-actions a.icon { padding: 4px; }
+    .row-actions a svg { width: 16px; height: 16px; }
+    .row-actions a:hover { border-color: var(--primary); color: var(--primary); }
+    .row-actions a.danger:hover { border-color: var(--red); color: var(--red); }
+    tr.totals-row td {
+        font-weight: 700;
+        background: #f1f5f9;
+        border-top: 2px solid var(--border);
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{% if crop.name %}{{ crop.name|first|upper }}{% else %}S{% endif %}</div>
+        <div class='profile-name'>
+            <h1>{{ season }}</h1>
+            <div class='profile-meta'>
+                <a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a>
+                &bull; {{ field|default:"-" }}
+                &bull; Planted {{ season.planting_date }}
+                &bull; {{ total_harvested }} {{ crop.default_unit }} harvested
+            </div>
+            <span class="status-badge active">{{ season.get_status_display }}</span>
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <span class='id-badge'>CSN-{{ season.pk|stringformat:"05d" }}</span>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_update' app='crops' model='cropseason' pk=season.pk %}?next={{ request.path }}', 'Edit Season')">Edit Season</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_create' app='crops' model='harvestrecord' %}?crop={{ crop.pk }}&crop_season={{ season.pk }}&next={{ request.path }}', 'New Harvest')">Add Harvest</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_delete' app='crops' model='cropseason' pk=season.pk %}', 'Delete Season')">Delete</a>
+    </div>
+</div>
+
+<div class='tab-bar'>
+    <button class='crop-tab active' data-tab='overview' onclick='switchCropTab("overview")'>Overview</button>
+    <button class='crop-tab' data-tab='harvests' onclick='switchCropTab("harvests")'>Harvests</button>
+    <button class='crop-tab' data-tab='processing' onclick='switchCropTab("processing")'>Processing</button>
+    <button class='crop-tab' data-tab='sales' onclick='switchCropTab("sales")'>Sales</button>
+</div>
+
+<div id='tab-overview' class='tab-pane active'>
+<div class="budget-header">
+    <div class="summary-card">
+        <h3>Season Info</h3>
+        <div class="summary-row"><span class="label">Crop</span><span class="value"><a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a></span></div>
+        <div class="summary-row"><span class="label">Field</span><span class="value">{{ field|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Variety</span><span class="value">{{ season.variety|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Planted</span><span class="value">{{ season.planting_date }}</span></div>
+        <div class="summary-row"><span class="label">Expected Harvest</span><span class="value">{{ season.expected_harvest_date|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Actual Harvest</span><span class="value">{{ season.actual_harvest_date|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Status</span><span class="value">{{ season.get_status_display }}</span></div>
+        <div class="summary-row"><span class="label">Perennial Season</span><span class="value">{% if season.is_perennial_season %}Yes{% else %}No{% endif %}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Production</h3>
+        <div class="summary-row"><span class="label">Harvests</span><span class="value">{{ total_harvests }}</span></div>
+        <div class="summary-row"><span class="label">Quantity Harvested</span><span class="value">{{ total_harvested }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Unprocessed in Store</span><span class="value">{{ quantity_in_store }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Processed in Store</span><span class="value">{{ total_processed_in_store }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Growing Expenses</span><span class="value">{{ total_expenses|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Processing Cost</span><span class="value">{{ total_processing_cost|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Value Added</span><span class="value green">{{ total_value_added|as_currency:currency }}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Sales</h3>
+        <div class="summary-row"><span class="label">Total Sales</span><span class="value">{{ sales|length }}</span></div>
+        <div class="summary-row"><span class="label">Sold Raw</span><span class="value">{{ total_raw_sold }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Sold Processed</span><span class="value">{{ total_processed_sold }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Total Quantity Sold</span><span class="value">{{ total_quantity_sold }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Sales Revenue</span><span class="value green">{{ total_revenue|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Depreciated</span><span class="value red">{{ total_depreciated }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Net Profit</span><span class="value {% if net_profit < 0 %}red{% else %}green{% endif %}" style="font-weight:700">{{ net_profit|as_currency:currency }}</span></div>
+    </div>
+</div>
+<div class="panel profile-card" style="margin-top:18px;">
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
+        <div>
+            <h3>Revenue, Cost &amp; Depreciation by Harvest</h3>
+            <div style="height:240px;"><canvas id="seasonLineChart"></canvas></div>
+            {{ chart_data|json_script:"season-chart-data" }}
+        </div>
+        <div>
+            <h3>Quantity Distribution</h3>
+            <div style="height:240px;"><canvas id="seasonPieChart"></canvas></div>
+            {{ pie_data|json_script:"season-pie-data" }}
+        </div>
+    </div>
+</div>
+</div>
+
+<div id='tab-harvests' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head">
+        <h3>Harvests</h3>
+        <a class="btn btn-primary" href="javascript:void(0)" onclick="openModal('{% url 'model_create' app='crops' model='harvestrecord' %}?crop={{ crop.pk }}&crop_season={{ season.pk }}&next={{ request.path }}', 'New Harvest')">+ Add Harvest</a>
+    </div>
+    {% if harvests %}
+    <table class="item-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Quantity</th>
+                <th>Raw Sold</th>
+                <th>Processed Sold</th>
+                <th class="amount-cell">Revenue</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in harvest_rows %}
+            <tr>
+                <td><a href="{% url 'harvest_detail' row.harvest.pk %}" style="text-decoration:none;color:inherit;">{{ row.harvest.harvest_date }}</a></td>
+                <td>{{ row.harvest.get_harvest_type_display }}</td>
+                <td>{{ row.harvest.quantity }} {{ row.harvest.unit }}</td>
+                <td>{{ row.raw_sold }} {{ row.harvest.unit }}</td>
+                <td>{{ row.processed_sold }} {{ row.harvest.unit }}</td>
+                <td class="amount-cell">{{ row.total_revenue|as_currency:currency }}</td>
+                <td><div class="row-actions">
+                    <a href="{% url 'harvest_detail' row.harvest.pk %}">View</a>
+                    <a class="icon" onclick="openModal('{% url 'model_update' app='crops' model='harvestrecord' pk=row.harvest.pk %}?next={{ request.path }}', 'Edit')" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                    <a class="icon danger" onclick="openModal('{% url 'model_delete' app='crops' model='harvestrecord' pk=row.harvest.pk %}?next={{ request.path }}', 'Delete')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></a>
+                </div></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--text-muted)">No harvests recorded for this season yet.</p>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-processing' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head">
+        <h3>Processing Stages</h3>
+    </div>
+    {% if processing_stages %}
+    <table class="item-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Harvest</th>
+                <th>#</th>
+                <th>Stage</th>
+                <th>Start</th>
+                <th>Days</th>
+                <th>End</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th class="amount-cell">Cost</th>
+                <th class="amount-cell">Value Added</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stage in processing_stages %}
+            <tr>
+                <td>{{ stage.harvest.harvest_date }}</td>
+                <td>{{ stage.sequence }}</td>
+                <td>{{ stage.name }}</td>
+                <td>{{ stage.start_date|default:"-" }}</td>
+                <td>{{ stage.duration_days|default:"-" }}</td>
+                <td>{{ stage.end_date|default:"-" }}</td>
+                <td>{{ stage.input_quantity }} {{ stage.harvest.unit }}</td>
+                <td>{% if stage.output_quantity is not None %}{{ stage.output_quantity }} {{ stage.output_unit|default:stage.harvest.unit }}{% else %}-{% endif %}</td>
+                <td class="amount-cell">{{ stage.cost|as_currency:currency }}</td>
+                <td class="amount-cell">{{ stage.added_value|as_currency:currency }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class='totals-row'>
+                <td colspan="5">Totals</td>
+                <td></td>
+                <td>{{ total_depreciated }} {{ crop.default_unit }} lost</td>
+                <td></td>
+                <td class="amount-cell">{{ total_processing_cost|as_currency:currency }}</td>
+                <td class="amount-cell">{{ total_value_added|as_currency:currency }}</td>
+            </tr>
+        </tfoot>
+    </table>
+    {% else %}
+    <p style="color:var(--text-muted)">No processing stages recorded for this season yet.</p>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-sales' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head"><h3>Sales Records</h3></div>
+    {% if sales %}
+    <table class="item-table" data-no-filter>
+        <thead><tr><th>Date</th><th>Harvest</th><th>Form</th><th>Quantity</th><th class="amount-cell">Unit Price</th><th class="amount-cell">Total</th><th>Buyer</th><th>Payment</th></tr></thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>{{ sale.sale_date }}</td>
+                <td>{{ sale.harvest.harvest_date }}</td>
+                <td>{% if sale.processing_stage %}{{ sale.processing_stage.sequence }}. {{ sale.processing_stage.name }}{% else %}Raw{% endif %}</td>
+                <td>{{ sale.quantity }} {{ sale.unit }}</td>
+                <td class="amount-cell">{{ sale.unit_price|as_currency:currency }}</td>
+                <td class="amount-cell">{{ sale.total_amount|as_currency:currency }}</td>
+                <td>{{ sale.buyer|default:"-" }}</td>
+                <td>{{ sale.get_payment_method_display }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class='totals-row'>
+                <td colspan="5">Totals</td>
+                <td class="amount-cell">{{ total_revenue|as_currency:currency }}</td>
+                <td colspan="2"></td>
+            </tr>
+        </tfoot>
+    </table>
+    {% else %}
+    <p style="color:var(--text-muted)">No sales recorded for this season yet.</p>
+    {% endif %}
+</div>
+</div>
+
+<script>
+function switchCropTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.crop-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('[data-tab=' + tabName + ']').classList.add('active');
+}
+
+var currencyRate = {{ currency.rate }};
+var currencySymbol = '{{ currency.symbol|escapejs }}';
+var seasonChartData = JSON.parse(document.getElementById('season-chart-data').textContent);
+new Chart(document.getElementById('seasonLineChart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: seasonChartData.labels,
+        datasets: [
+            {
+                label: 'Processing Cost',
+                data: seasonChartData.costs.map(function(v) { return v * currencyRate; }),
+                borderColor: '#ef4444',
+                backgroundColor: '#ef4444',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Sales Revenue',
+                data: seasonChartData.revenues.map(function(v) { return v * currencyRate; }),
+                borderColor: '#22c55e',
+                backgroundColor: '#22c55e',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Depreciated',
+                data: seasonChartData.depreciated,
+                borderColor: '#f59e0b',
+                backgroundColor: '#f59e0b',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y1'
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+            y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: { display: true, text: currencySymbol }
+            },
+            y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: { display: true, text: '{{ crop.default_unit|escapejs }}' },
+                grid: { drawOnChartArea: false }
+            }
+        }
+    }
+});
+
+var seasonPieData = JSON.parse(document.getElementById('season-pie-data').textContent);
+new Chart(document.getElementById('seasonPieChart').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: seasonPieData.labels,
+        datasets: [{
+            data: seasonPieData.values,
+            backgroundColor: ['#4a7c2e', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f97316'],
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+        }
+    }
+});
+</script>
+{% endblock %}

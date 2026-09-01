@@ -1,0 +1,533 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Harvest - {{ crop.name }}{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a> &rsaquo; Harvest {{ harvest.harvest_date }}{% endblock %}
+{% block extra_head %}
+<style>
+    .budget-header {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    @media (max-width: 900px) {
+        .budget-header { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+        .budget-header { grid-template-columns: 1fr; }
+    }
+    .summary-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .summary-card h3 {
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .label { color: var(--text-muted); }
+    .summary-row .value { font-weight: 700; color: var(--text); }
+    .summary-row .value.green { color: var(--primary); }
+    .summary-row .value.red { color: var(--red); }
+    .status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .status-badge.active { background: #d1fae5; color: #065f46; }
+    .item-table td { vertical-align: middle; }
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 22px;
+        margin-bottom: 18px;
+    }
+    .profile-identity { display: flex; align-items: center; gap: 16px; }
+    .avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .profile-name h1 { margin: 0 0 6px; font-size: 1.35rem; color: var(--primary-dark); }
+    .profile-meta { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
+    .profile-meta a { color: var(--primary); text-decoration: none; }
+    .id-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .profile-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 20px;
+    }
+    .crop-tab {
+        padding: 10px 18px;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    .crop-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .profile-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+    }
+    .profile-card h3 {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin: 0 0 14px;
+        color: var(--primary-dark);
+        font-weight: 700;
+    }
+    .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin-bottom: 14px;
+    }
+    .section-head h3 {
+        border: none;
+        padding: 0;
+        margin: 0;
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .row-actions a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.72rem;
+        padding: 3px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+    .row-actions a.icon { padding: 4px; }
+    .row-actions a svg { width: 16px; height: 16px; }
+    .row-actions a:hover { border-color: var(--primary); color: var(--primary); }
+    .row-actions a.danger:hover { border-color: var(--red); color: var(--red); }
+    .hg-note {
+        margin-top: 10px;
+        padding: 8px 10px;
+        border-left: 3px solid var(--primary);
+        background: #f8fafc;
+        color: var(--text-muted);
+        font-size: 0.76rem;
+        border-radius: 4px;
+        margin-bottom: 10px;
+    }
+    tr.totals-row td {
+        font-weight: 700;
+        background: #f1f5f9;
+        border-top: 2px solid var(--border);
+    }
+    /* narrow dividers marking the start of the In / Out / Loss column groups */
+    .item-table th.grp-sep,
+    .item-table td.grp-sep {
+        border-left: 1px solid #cbd5e1;
+    }
+    .item-table th.grp-head {
+        text-align: center;
+        font-size: 0.7rem;
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{% if crop.name %}{{ crop.name|first|upper }}{% else %}H{% endif %}</div>
+        <div class='profile-name'>
+            <h1>{{ crop.name }} Harvest &bull; {{ harvest.harvest_date }}</h1>
+            <div class='profile-meta'>
+                <a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a>
+                &bull; {{ harvest.crop_season }}
+                &bull; {{ harvest.quantity }} {{ harvest.unit }} harvested
+            </div>
+            <span class="status-badge active">{{ harvest.get_harvest_type_display }}</span>
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <span class='id-badge'>HVT-{{ harvest.pk|stringformat:"05d" }}</span>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_update' app='crops' model='harvestrecord' pk=harvest.pk %}?next={{ request.path }}', 'Edit Harvest')">Edit Harvest</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_create' app='crops' model='processingstage' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&next={{ request.path }}', 'New Processing Stage')">Add Stage</a>
+        <a class='btn btn-secondary' href="{% url 'report_harvest' harvest_id=harvest.pk %}" target="_blank">Report</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{% url 'model_delete' app='crops' model='harvestrecord' pk=harvest.pk %}?next={% url 'crop_detail' crop.pk %}', 'Delete Harvest')">Delete</a>
+    </div>
+</div>
+
+<div class='tab-bar'>
+    <button class='crop-tab active' data-tab='overview' onclick='switchCropTab("overview")'>Overview</button>
+    <button class='crop-tab' data-tab='stock' onclick='switchCropTab("stock")'>Stock Breakdown</button>
+    <button class='crop-tab' data-tab='processing' onclick='switchCropTab("processing")'>Processing</button>
+    <button class='crop-tab' data-tab='sales' onclick='switchCropTab("sales")'>Sales</button>
+</div>
+
+<div id='tab-overview' class='tab-pane active'>
+<div class="budget-header">
+    <div class="summary-card">
+        <h3>Harvest Info</h3>
+        <div class="summary-row"><span class="label">Date</span><span class="value">{{ harvest.harvest_date }}</span></div>
+        <div class="summary-row"><span class="label">Type</span><span class="value">{{ harvest.get_harvest_type_display }}</span></div>
+        <div class="summary-row"><span class="label">Quantity Harvested</span><span class="value">{{ harvest.quantity }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Quality Grade</span><span class="value">{{ harvest.quality_grade|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Moisture</span><span class="value">{% if harvest.moisture_content %}{{ harvest.moisture_content }}%{% else %}-{% endif %}</span></div>
+        <div class="summary-row"><span class="label">Season</span><span class="value">{{ harvest.crop_season }}</span></div>
+        <div class="summary-row"><span class="label">Field</span><span class="value">{{ harvest.crop_season.field|default:"-" }}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Stock &amp; Processing</h3>
+        <div class="summary-row"><span class="label">Sent to Processing</span><span class="value">{{ first_input }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Raw Available</span><span class="value">{{ raw_available }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Unprocessed in Store</span><span class="value">{{ raw_remaining }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Processed in Store</span><span class="value">{{ processed_in_store }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Processing Stages</span><span class="value">{{ stages|length }}</span></div>
+        <div class="summary-row"><span class="label">Depreciated</span><span class="value red">{{ total_depreciated }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Processing Cost</span><span class="value">{{ total_processing_cost|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Value Added</span><span class="value green">{{ total_value_added|as_currency:currency }}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Sales</h3>
+        <div class="summary-row"><span class="label">Total Sales</span><span class="value">{{ sales|length }}</span></div>
+        <div class="summary-row"><span class="label">Sold Raw</span><span class="value">{{ raw_sold }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Sold Processed</span><span class="value">{{ processed_sold }}</span></div>
+        <div class="summary-row"><span class="label">Total Quantity Sold</span><span class="value">{{ total_sold }} {{ harvest.unit }}</span></div>
+        <div class="summary-row"><span class="label">Raw Revenue</span><span class="value green">{{ raw_revenue|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Processed Revenue</span><span class="value green">{{ processed_revenue|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Total Revenue</span><span class="value green">{{ total_revenue|as_currency:currency }}</span></div>
+    </div>
+</div>
+<div class="panel profile-card" style="margin-top:18px;">
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
+        <div>
+            <h3>Harvest Expense, Sales &amp; Depreciation</h3>
+            <div style="height:240px;">
+                <canvas id="harvestChart"></canvas>
+            </div>
+            {{ chart_data|json_script:"harvest-chart-data" }}
+        </div>
+        <div>
+            <h3>Stock by Form</h3>
+            <div style="height:240px;">
+                <canvas id="harvestPie"></canvas>
+            </div>
+            {{ pie_data|json_script:"harvest-pie-data" }}
+        </div>
+    </div>
+</div>
+</div>
+<div id='tab-stock' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head">
+        <h3>Stock Breakdown by Form</h3>
+        <a class="btn btn-primary" href="javascript:void(0)" onclick="openModal('{% url 'model_create' app='crops' model='processingstage' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&next={{ request.path }}', 'New Processing Stage')">+ Add Stage</a>
+    </div>
+    <div class='hg-note'>
+        Each row is one form this harvest existed in. <strong>Quantity before processing</strong> is the
+        stock that entered that form, <strong>Out</strong> is where it went (on to the next processing stage,
+        or sold), and <strong>Balance</strong> is what is still sitting in store. For every row:
+        Quantity before processing &minus; Loss &minus; Out&nbsp;to&nbsp;Processing &minus; Out&nbsp;Sold = Balance.
+        Processed rows are the same produce in a new form, not extra produce.
+    </div>
+    <table class="item-table" data-no-filter>
+        <thead>
+            <tr>
+                <th rowspan="2">Form</th>
+                <th rowspan="2" class="grp-sep grp-head">Period in days</th>
+                <th rowspan="2" class="grp-sep grp-head">Quantity before processing</th>
+                <th colspan="2" class="grp-sep grp-head">Out</th>
+                <th rowspan="2" class="grp-sep">Loss</th>
+                <th rowspan="2">Balance in Store</th>
+                <th rowspan="2" class="amount-cell">Revenue</th>
+                <th rowspan="2">Sales</th>
+                <th rowspan="2">Actions</th>
+            </tr>
+            <tr>
+                <th class="grp-sep">To Processing</th>
+                <th>Sold</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for line in lines %}
+            <tr>
+                <td>
+                    {% if line.is_raw %}<span class="status-badge">Raw</span>{% else %}<span class="status-badge active">Processed</span>{% endif %}
+                    {{ line.label }}
+                    <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">{{ line.in_source }}</div>
+                </td>
+                <td class="grp-sep">{{ line.stage.duration_days|default:"-" }}</td>
+                <td class="grp-sep">{% if line.qty_in is not None %}+{{ line.qty_in }} {{ line.unit }}{% else %}<span style="color:var(--text-muted)">no output recorded</span>{% endif %}</td>
+                <td class="grp-sep">{% if line.out_processing %}&minus;{{ line.out_processing }} {{ line.unit }}{% else %}-{% endif %}</td>
+                <td>{% if line.out_sold %}&minus;{{ line.out_sold }} {{ line.unit }}{% else %}-{% endif %}</td>
+                <td class="grp-sep">{% if line.loss %}<span style="color:var(--red)">&minus;{{ line.loss }} {{ line.unit }}</span>{% else %}-{% endif %}</td>
+                <td>{% if line.balance is not None %}<strong>{{ line.balance }} {{ line.unit }}</strong>{% else %}-{% endif %}</td>
+                <td class="amount-cell">{{ line.revenue|as_currency:currency }}</td>
+                <td>{{ line.sale_count }}</td>
+                <td><div class="row-actions">
+                    {% if line.is_raw %}
+                    <a class="icon" onclick="openModal('{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&raw=1&next={{ request.path }}', 'Sell Raw')" title="Sell Raw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></a>
+                    {% else %}
+                    <a class="icon" onclick="openModal('{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&processing_stage={{ line.stage.pk }}&next={{ request.path }}', 'Sell')" title="Sell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></a>
+                    <a class="icon" onclick="openModal('{% url 'model_update' app='crops' model='processingstage' pk=line.stage.pk %}?next={{ request.path }}', 'Edit')" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                    {% endif %}
+                </div></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class='totals-row'>
+                <td>Totals</td>
+                <td class="grp-sep"></td>
+                <td class="grp-sep">{{ harvest.quantity }} {{ harvest.unit }} from field</td>
+                <td class="grp-sep">{{ first_input }} {{ harvest.unit }}</td>
+                <td>{{ total_sold }} {{ harvest.unit }}</td>
+                <td class="grp-sep">{{ total_depreciated }} {{ harvest.unit }}</td>
+                <td>{{ raw_remaining }} raw + {{ processed_in_store }} processed</td>
+                <td class="amount-cell">{{ total_revenue|as_currency:currency }}</td>
+                <td>{{ sales|length }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+</div>
+
+<div id='tab-processing' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head">
+        <h3>Processing Stages</h3>
+        <a class="btn btn-primary" href="javascript:void(0)" onclick="openModal('{% url 'model_create' app='crops' model='processingstage' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&next={{ request.path }}', 'New Processing Stage')">+ Add Stage</a>
+    </div>
+    {% if stages %}
+    <table class="item-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Stage</th>
+                <th>Start</th>
+                <th>Days</th>
+                <th>End</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th class="amount-cell">Cost</th>
+                <th class="amount-cell">Value Added</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stage in stages %}
+            <tr>
+                <td>{{ stage.sequence }}</td>
+                <td>{{ stage.name }}</td>
+                <td>{{ stage.start_date|default:"-" }}</td>
+                <td>{{ stage.duration_days|default:"-" }}</td>
+                <td>{{ stage.end_date|default:"-" }}</td>
+                <td>{{ stage.input_quantity }} {{ harvest.unit }}</td>
+                <td>{% if stage.output_quantity is not None %}{{ stage.output_quantity }} {{ stage.output_unit|default:harvest.unit }}{% else %}-{% endif %}</td>
+                <td class="amount-cell">{{ stage.cost|as_currency:currency }}</td>
+                <td class="amount-cell">{{ stage.added_value|as_currency:currency }}</td>
+                <td><div class="row-actions">
+                    <a class="icon" onclick="openModal('{% url 'model_update' app='crops' model='processingstage' pk=stage.pk %}?next={{ request.path }}', 'Edit Stage')" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                    <a class="icon danger" onclick="openModal('{% url 'model_delete' app='crops' model='processingstage' pk=stage.pk %}?next={{ request.path }}', 'Delete Stage')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></a>
+                </div></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class='totals-row'>
+                <td colspan="5">Totals</td>
+                <td>{{ first_input }} {{ harvest.unit }} in</td>
+                <td>{{ total_depreciated }} {{ harvest.unit }} lost</td>
+                <td class="amount-cell">{{ total_processing_cost|as_currency:currency }}</td>
+                <td class="amount-cell">{{ total_value_added|as_currency:currency }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    {% else %}
+    <p style="color:var(--text-muted)">No processing stages recorded for this harvest yet.</p>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-sales' class='tab-pane'>
+<div class="panel profile-card">
+    <div class="section-head"><h3>Sales Records</h3>
+        <a class="btn btn-primary" href="javascript:void(0)" onclick="openModal('{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ harvest.pk }}&next={{ request.path }}', 'New Sale')">+ Record Sale</a>
+    </div>
+    {% if sales %}
+    <table class="item-table">
+        <thead><tr><th>Date</th><th>Form</th><th>Quantity</th><th class="amount-cell">Unit Price</th><th class="amount-cell">Total</th><th>Buyer</th><th>Payment</th><th>Actions</th></tr></thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>{{ sale.sale_date }}</td>
+                <td>{% if sale.processing_stage %}{{ sale.processing_stage.sequence }}. {{ sale.processing_stage.name }}{% else %}Raw{% endif %}</td>
+                <td>{{ sale.quantity }} {{ sale.unit }}</td>
+                <td class="amount-cell">{{ sale.unit_price|as_currency:currency }}</td>
+                <td class="amount-cell">{{ sale.total_amount|as_currency:currency }}</td>
+                <td>{{ sale.buyer|default:"-" }}</td>
+                <td>{{ sale.get_payment_method_display }}</td>
+                <td><div class="row-actions">
+                    <a class="icon" onclick="openModal('{% url 'model_update' app='crops' model='sale' pk=sale.pk %}?next={{ request.path }}', 'Edit')" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                    <a class="icon danger" onclick="openModal('{% url 'model_delete' app='crops' model='sale' pk=sale.pk %}?next={{ request.path }}', 'Delete')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></a>
+                </div></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--text-muted)">No sales recorded for this harvest yet.</p>
+    {% endif %}
+</div>
+</div>
+
+<script>
+function switchCropTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.crop-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('[data-tab=' + tabName + ']').classList.add('active');
+}
+
+var currencyRate = {{ currency.rate }};
+var currencySymbol = '{{ currency.symbol|escapejs }}';
+var rawData = JSON.parse(document.getElementById('harvest-chart-data').textContent);
+var ctx = document.getElementById('harvestChart').getContext('2d');
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: rawData.labels,
+        datasets: [
+            {
+                label: 'Processing Cost',
+                data: rawData.costs.map(function(v) { return v * currencyRate; }),
+                borderColor: '#ef4444',
+                backgroundColor: '#ef4444',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Sales Revenue',
+                data: rawData.revenues.map(function(v) { return v * currencyRate; }),
+                borderColor: '#22c55e',
+                backgroundColor: '#22c55e',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Depreciated',
+                data: rawData.depreciated,
+                borderColor: '#f59e0b',
+                backgroundColor: '#f59e0b',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y1'
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+            y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: { display: true, text: currencySymbol }
+            },
+            y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: { display: true, text: '{{ harvest.unit|escapejs }}' },
+                grid: { drawOnChartArea: false }
+            }
+        }
+    }
+});
+
+var pieData = JSON.parse(document.getElementById('harvest-pie-data').textContent);
+new Chart(document.getElementById('harvestPie').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: pieData.labels,
+        datasets: [{
+            data: pieData.values,
+            backgroundColor: ['#4a7c2e', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f97316'],
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+        }
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,327 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ source.waste_name }} Waste Details{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='crops' model='sale' %}?waste=1">Waste Management</a> &rsaquo; {{ source.waste_name }}{% endblock %}
+{% block nav_waste %}active{% endblock %}
+{% block extra_head %}
+<style>
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin-bottom: 14px;
+    }
+    .section-head h3 { margin: 0; color: var(--primary-dark); font-size: 0.95rem; font-weight: 700; }
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    .summary-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .summary-card h3 {
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .label { color: var(--text-muted); }
+    .summary-row .value { font-weight: 700; color: var(--text); }
+    .summary-row .value.green { color: var(--primary); }
+    .summary-row .value.red { color: var(--red); }
+    tr.totals-row td { font-weight: 700; background: #f8fafc; border-top: 2px solid var(--border); }
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 22px;
+        margin-bottom: 18px;
+    }
+    .profile-identity { display: flex; align-items: center; gap: 16px; }
+    .avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .profile-name h1 { margin: 0 0 6px; font-size: 1.35rem; color: var(--primary-dark); }
+    .profile-meta { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; }
+    .profile-meta a { color: var(--primary); text-decoration: none; }
+    .id-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .status-badge.active { background: #d1fae5; color: #065f46; }
+    .profile-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 20px;
+    }
+    .crop-tab {
+        padding: 10px 18px;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    .crop-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{{ source.waste_name|first|upper|default:"W" }}</div>
+        <div class='profile-name'>
+            <h1>{{ source.waste_name }} <span style="color:var(--text-muted);font-size:0.9rem;">Waste</span></h1>
+            <div class='profile-meta'>
+                <a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a>
+                &bull; {{ source.label }}
+                &bull; {{ harvest.harvest_date }}
+            </div>
+            <span class="status-badge active">Waste</span>
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <span class='id-badge'>WST-{{ sale.pk|stringformat:"05d" }}</span>
+        <a class='btn btn-secondary' href='javascript:void(0)' onclick="openModal('{{ edit_source_url }}', 'Edit Source')">Edit Source</a>
+        <a class='btn btn-primary' href='javascript:void(0)' onclick="openModal('{{ create_url }}', 'Sell Waste')">+ Sell Waste</a>
+    </div>
+</div>
+
+<div class='tab-bar'>
+    <button class='crop-tab active' data-tab='overview' onclick='switchCropTab("overview")'>Overview</button>
+    <button class='crop-tab' data-tab='sales' onclick='switchCropTab("sales")'>Waste Sales</button>
+</div>
+
+<div id='tab-overview' class='tab-pane active'>
+    <div class="summary-grid">
+        <div class="summary-card">
+            <h3>Waste Info</h3>
+            <div class="summary-row"><span class="label">Source</span><span class="value">{{ source.label }}</span></div>
+            <div class="summary-row"><span class="label">Crop</span><span class="value">{{ crop.name }}</span></div>
+            <div class="summary-row"><span class="label">Harvest</span><span class="value">{{ harvest.harvest_date }}</span></div>
+            <div class="summary-row"><span class="label">Quantity</span><span class="value">{{ source.waste_quantity }} {{ source.unit }}</span></div>
+            <div class="summary-row"><span class="label">Unit Price</span><span class="value">{{ unit_price|as_currency:currency }}</span></div>
+            <div class="summary-row"><span class="label">Value</span><span class="value">{{ source.waste_value|as_currency:currency }}</span></div>
+        </div>
+        <div class="summary-card">
+            <h3>Summary</h3>
+            <div class="summary-row"><span class="label">Waste Sales</span><span class="value">{{ waste_sales|length }}</span></div>
+            <div class="summary-row"><span class="label">Total Sold</span><span class="value">{{ total_sold }} {{ source.unit }}</span></div>
+            <div class="summary-row"><span class="label">Revenue</span><span class="value green">{{ total_revenue|as_currency:currency }}</span></div>
+            <div class="summary-row"><span class="label">Remaining</span><span class="value">{{ remaining }} {{ source.unit }}</span></div>
+        </div>
+        <div class="summary-card">
+            <h3>Status</h3>
+            <div class="summary-row"><span class="label">Sold %</span><span class="value">{{ sold_percentage|floatformat:1 }}%</span></div>
+            <div class="summary-row"><span class="label">Remaining Value</span><span class="value">{{ remaining_value|as_currency:currency }}</span></div>
+            <div class="summary-row"><span class="label">Total Waste Value</span><span class="value">{{ source.waste_value|as_currency:currency }}</span></div>
+            <div class="summary-row"><span class="label">Sales Count</span><span class="value">{{ waste_sales|length }}</span></div>
+        </div>
+    </div>
+</div>
+
+<div class="panel profile-card" style="margin-top:18px;">
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
+        <div>
+            <h3>Waste Sold vs Available</h3>
+            <div style="height:240px;">
+                <canvas id="wasteChart"></canvas>
+            </div>
+            {{ chart_data|json_script:"waste-chart-data" }}
+        </div>
+        <div>
+            <h3>Waste Breakdown</h3>
+            <div style="height:240px;">
+                <canvas id="wastePie"></canvas>
+            </div>
+            {{ pie_data|json_script:"waste-pie-data" }}
+        </div>
+    </div>
+</div>
+
+<div id='tab-sales' class='tab-pane'>
+    <div class="panel profile-card">
+        <div class="section-head">
+            <h3>Waste Sales Management</h3>
+            <a class="btn btn-primary" href="javascript:void(0)" onclick="openModal('{{ create_url }}', 'Sell Waste')">+ Sell Waste</a>
+        </div>
+        {% if waste_sales %}
+        <table class="item-table" data-no-filter>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>From</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                    <th>Buyer</th>
+                    <th>Payment</th>
+                    <th style="text-align:right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in waste_sales %}
+                <tr>
+                    <td>{{ s.sale_date }}</td>
+                    <td>{% if s.processing_stage %}Stage {{ s.processing_stage.sequence }}. {{ s.processing_stage.name }}{% else %}{{ source.label }}{% endif %}</td>
+                    <td>{{ s.quantity }} {{ s.unit }}</td>
+                    <td class="amount-cell">{{ s.unit_price|as_currency:currency }}</td>
+                    <td class="amount-cell">{{ s.total_amount|as_currency:currency }}</td>
+                    <td>{{ s.buyer|default:"-" }}</td>
+                    <td>{{ s.get_payment_method_display }}</td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <a class="action-btn edit" onclick="openModal('{{ s.update_url }}', 'Edit Waste Sale')" href="javascript:void(0)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Edit
+                        </a>
+                        <a class="action-btn delete" onclick="openModal('{{ s.delete_url }}', 'Delete Waste Sale')" href="javascript:void(0)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                            Delete
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr class="totals-row">
+                    <td>Total</td>
+                    <td></td>
+                    <td>{{ total_sold }} {{ source.unit }}</td>
+                    <td></td>
+                    <td class="amount-cell">{{ total_revenue|as_currency:currency }}</td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--text-muted)">No waste sales recorded for this source.</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function switchCropTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.crop-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('[data-tab=' + tabName + ']').classList.add('active');
+}
+
+var wasteChartData = JSON.parse(document.getElementById('waste-chart-data').textContent);
+new Chart(document.getElementById('wasteChart').getContext('2d'), {
+    type: 'line',
+    data: {
+        labels: wasteChartData.labels,
+        datasets: [
+            {
+                label: 'Sold',
+                data: wasteChartData.sold,
+                borderColor: '#22c55e',
+                backgroundColor: '#22c55e',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                fill: false
+            },
+            {
+                label: 'Available',
+                data: wasteChartData.available,
+                borderColor: '#3b82f6',
+                backgroundColor: '#3b82f6',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+                tension: 0.3,
+                fill: false
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+            y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: { display: true, text: '{{ source.unit|escapejs }}' }
+            }
+        }
+    }
+});
+
+var wastePieData = JSON.parse(document.getElementById('waste-pie-data').textContent);
+new Chart(document.getElementById('wastePie').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: wastePieData.labels,
+        datasets: [{
+            data: wastePieData.values,
+            backgroundColor: ['#22c55e', '#3b82f6'],
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+        }
+    }
+});
+</script>
+{% endblock %}

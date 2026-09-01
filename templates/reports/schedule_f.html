@@ -1,0 +1,30 @@
+{% extends "reports/report_base.html" %}
+{% block content %}
+<h1>Schedule F Report</h1>
+<div class="filters">
+    <form method="get">
+        <label>Year:</label>
+        <input type="number" name="year" value="{{ year|default:'' }}" min="2000" max="2099">
+        <button type="submit">Filter</button>
+    </form>
+</div>
+<div class="export-links">
+    <a href="?export=pdf{% if year %}&year={{ year }}{% endif %}">Export PDF</a>
+    <a href="?export=csv{% if year %}&year={{ year }}{% endif %}">Export CSV</a>
+</div>
+
+<table>
+    <tr><th>Schedule F Line</th><th>Category</th><th style="text-align:right">Amount</th></tr>
+    {% for item in line_items %}
+    <tr>
+        <td>{{ item.schedule_f_line }}</td>
+        <td>{{ item.category }}</td>
+        <td style="text-align:right">{{ item.amount|as_currency:currency }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row">
+        <td colspan="2">TOTAL</td>
+        <td style="text-align:right">{{ total|as_currency:currency }}</td>
+    </tr>
+</table>
+{% endblock %}

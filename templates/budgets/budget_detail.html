@@ -1,0 +1,395 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ budget.name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Budgets &rsaquo; {{ budget.name }}{% endblock %}
+{% block nav_budgets %}active{% endblock %}
+
+{% block extra_head %}
+<style>
+    .budget-header {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    @media (max-width: 700px) {
+        .budget-header { grid-template-columns: 1fr; }
+    }
+    .summary-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .summary-card h3 {
+        margin: 0 0 10px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-row .label { color: var(--text-muted); }
+    .summary-row .value { font-weight: 700; color: var(--text); }
+    .summary-row .value.green { color: var(--primary); }
+    .summary-row .value.red { color: var(--red); }
+
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e2e8f0;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 4px;
+    }
+    .progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+    }
+    .progress-fill.normal { background: var(--primary); }
+    .progress-fill.warning { background: var(--accent); }
+    .progress-fill.over { background: var(--red); }
+
+    .status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .status-badge.draft { background: #fef3c7; color: #92400e; }
+    .status-badge.active { background: #d1fae5; color: #065f46; }
+    .status-badge.closed { background: #e0e7ff; color: #3730a3; }
+
+    .item-table td { vertical-align: middle; }
+    .item-name { font-weight: 600; }
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .pct-cell { width: 120px; }
+    .over-budget-tag {
+        display: inline-block;
+        background: #fef2f2;
+        color: var(--red);
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-left: 6px;
+    }
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.82rem;
+        margin-bottom: 12px;
+    }
+    .back-link:hover { color: var(--primary); }
+    .budget-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+    }
+    .budget-title-row h1 {
+        margin: 0;
+        font-size: 1.3rem;
+        color: var(--primary-dark);
+    }
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 22px;
+        margin-bottom: 18px;
+    }
+    .profile-identity {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    .avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .profile-name h1 {
+        margin: 0 0 6px;
+        font-size: 1.35rem;
+        color: var(--primary-dark);
+    }
+    .profile-meta {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+    }
+    .id-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .profile-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 20px;
+    }
+    .budget-tab {
+        padding: 10px 18px;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    .budget-tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        font-weight: 600;
+    }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .summary-card h3 {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin: 0 0 14px;
+        color: var(--primary-dark);
+        font-weight: 700;
+    }
+    .profile-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{% if budget.name %}{{ budget.name|first|upper }}{% else %}B{% endif %}</div>
+        <div class='profile-name'>
+            <h1>{{ budget.name }}</h1>
+            <div class='profile-meta'>{{ budget.farm_profile|default:"-" }} &bull; {{ budget.start_date|default:"-" }} &rarr; {{ budget.end_date|default:"-" }}</div>
+            <span class="status-badge {{ budget.status|lower }}">{{ budget.status|title }}</span>
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <span class='id-badge'>BDG-{{ budget.pk|stringformat:"05d" }}</span>
+        <button class='btn btn-primary' onclick="openModal('{% url 'budget_item_add' budget_pk=budget.pk %}', 'New Budget Item')">
+            <svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M12 5v14M5 12h14'/></svg>
+            Add Budget Item
+        </button>
+        <a class='btn btn-secondary' href='{% url 'model_update' app='budgets' model='budget' pk=budget.pk %}'>Edit Budget</a>
+        <a class='btn btn-secondary' href='{% url 'model_list' app='expenses' model='expense' %}'>View Expenses</a>
+    </div>
+</div>
+
+<div class='tab-bar'>
+    <button class='budget-tab active' data-tab='overview' onclick='switchBudgetTab("overview")'>Overview</button>
+    <button class='budget-tab' data-tab='expenses' onclick='switchBudgetTab("expenses")'>Budget Expenses</button>
+</div>
+
+<div id='tab-overview' class='tab-pane active'>
+<div class='budget-header'>
+    <div class="summary-card">
+        <h3>Budget Info</h3>
+        <div class="summary-row">
+            <span class="label">Farm</span>
+            <span class="value">{{ budget.farm_profile|default:"-" }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Period</span>
+            <span class="value">{{ budget.start_date|default:"-" }} &rarr; {{ budget.end_date|default:"-" }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Budget Items</span>
+            <span class="value">{{ item_data|length }}</span>
+        </div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Financial Summary</h3>
+        <div class="summary-row">
+            <span class="label">Total Planned</span>
+            <span class="value">{{ total_planned|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Total Spent</span>
+            <span class="value">{{ total_spent|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Remaining</span>
+            <span class="value {% if remaining < 0 %}red{% else %}green{% endif %}">{{ remaining|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Overall Burn Rate</span>
+            <span class="value">{{ overall_pct }}%</span>
+        </div>
+        <div class="progress-bar" style="margin-top:6px;">
+            <div class="progress-fill {% if overall_pct > 100 %}over{% elif overall_pct > 80 %}warning{% else %}normal{% endif %}"
+                 style="width: {% if overall_pct > 100 %}100{% else %}{{ overall_pct }}{% endif %}%;"></div>
+        </div>
+    </div>
+</div>
+
+<div class='panel profile-card'>
+    <h3 style="margin:0 0 10px; font-size:0.9rem; color:var(--primary-dark);">Budget Items</h3>
+    {% if item_data %}
+    <table class="item-table">
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Category</th>
+                <th>Crop Season</th>
+                <th class="amount-cell">Planned</th>
+                <th class="amount-cell">Spent</th>
+                <th class="amount-cell">Remaining</th>
+                <th class="amount-cell">Fund Pool</th>
+                <th class="pct-cell">Progress</th>
+                <th style="text-align:right;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in item_data %}
+            <tr>
+                <td><strong>{{ row.code|default:"-" }}</strong></td>
+                <td class="item-name">
+                    {{ row.item.category.name }}
+                    {% if row.over_budget %}<span class="over-budget-tag">Over Budget</span>{% endif %}
+                </td>
+                <td>{{ row.item.crop_season|default:"-" }}</td>
+                <td class="amount-cell">{{ row.item.planned_amount|as_currency:currency }}</td>
+                <td class="amount-cell">{{ row.spent|as_currency:currency }}</td>
+                <td class="amount-cell {% if row.remaining < 0 %}red{% endif %}">{{ row.remaining|as_currency:currency }}</td>
+                <td class="amount-cell" style="font-size:0.75rem;">
+                    <div>{{ row.fund_amount|as_currency:currency }}</div>
+                    <div style="color:{% if row.fund_remaining < 0 %}var(--red){% else %}var(--text-muted){% endif %}; font-size:0.68rem;">
+                        {% if row.fund_remaining < 0 %}Over fund{% else %}{{ row.fund_remaining }} left{% endif %}
+                    </div>
+                </td>
+                <td class="pct-cell">
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:2px;">{{ row.pct }}%</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill {% if row.over_budget %}over{% elif row.pct > 80 %}warning{% else %}normal{% endif %}"
+                             style="width: {% if row.pct > 100 %}100{% else %}{{ row.pct }}{% endif %}%;"></div>
+                    </div>
+                </td>
+                <td style="text-align:right; white-space:nowrap;">
+                    <a class="action-btn edit" onclick="openModal('{% url 'model_update' app='budgets' model='budgetitem' pk=row.item.pk %}', 'Edit Budget Item')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </a>
+                    <a class="action-btn delete" onclick="openModal('{% url 'model_delete' app='budgets' model='budgetitem' pk=row.item.pk %}', 'Delete Budget Item')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        Delete
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <p>No budget items yet. Add items to start tracking planned vs actual spending.</p>
+    </div>
+    {% endif %}
+
+    <div style="margin-top:12px;">
+        <button class="btn btn-primary" onclick="openModal('{% url 'budget_item_add' budget_pk=budget.pk %}', 'New Budget Item')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add Budget Item
+        </button>
+        <a class="btn btn-secondary" href="{% url 'model_list' app='expenses' model='expense' %}" style="margin-left:8px;">
+            View Expenses
+        </a>
+        <a class="btn btn-secondary" href="{% url 'model_update' app='budgets' model='budget' pk=budget.pk %}" style="margin-left:8px;">
+            Edit Budget
+        </a>
+    </div>
+</div>
+</div>
+
+<div id='tab-expenses' class='tab-pane'>
+<div class='panel profile-card'>
+    <h3 style='margin:0 0 10px; font-size:0.9rem; color:var(--primary-dark);'>Budget Expenses</h3>
+    {% if expenses %}
+    <table class='item-table'>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Vendor</th>
+                <th>Payment Method</th>
+                <th class='amount-cell'>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for expense in expenses %}
+            <tr>
+                <td>{{ expense.date }}</td>
+                <td>{{ expense.category.name }}</td>
+                <td>{{ expense.vendor|default:"-" }}</td>
+                <td>{{ expense.payment_method|title }}</td>
+                <td class='amount-cell'>{{ expense.amount|as_currency:currency }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class='empty-state'>
+        <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><rect x='2' y='5' width='20' height='14' rx='2'/><line x1='2' y1='10' x2='22' y2='10'/></svg>
+        <p>No expenses recorded for this budget yet.</p>
+    </div>
+    {% endif %}
+    <div style='margin-top:12px;'>
+        <a class='btn btn-secondary' href='{% url 'model_list' app='expenses' model='expense' %}'>View All Expenses</a>
+    </div>
+</div>
+</div>
+
+<script>
+function switchBudgetTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.budget-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('[data-tab=' + tabName + ']').classList.add('active');
+}
+</script>
+{% endblock %}

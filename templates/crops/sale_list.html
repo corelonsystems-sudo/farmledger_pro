@@ -1,0 +1,154 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ model_name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}{{ model_name }}{% endblock %}
+{% block nav_sales %}{% if not is_waste %}active{% endif %}{% endblock %}
+{% block nav_waste %}{% if is_waste %}active{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: end; }
+    .filter-bar .form-group { display: flex; flex-direction: column; margin: 0; }
+    .filter-bar label { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 3px; text-transform: uppercase; }
+    .filter-bar input, .filter-bar select { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.82rem; }
+    .totals-bar { display: flex; gap: 14px; margin-bottom: 14px; font-size: 0.85rem; }
+    .totals-bar span { background: none; padding: 12px 12px; border-radius: 0px; border-right: 1px solid gray; }
+    .action-btn.view { background: #f0fdf4; color: var(--primary); }
+    .empty-state { text-align: center; padding: 28px; color: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+    <h2 style="margin:0; color:var(--primary-dark); font-size:1.05rem;">{{ model_name }}</h2>
+    <button class="btn btn-primary" onclick="openModal('{{ urls.create }}{% if is_waste %}?waste=1{% endif %}', '{{ create_label }}')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        Add New
+    </button>
+</div>
+
+<form class="filter-bar" method="get" id="saleFilters">
+    {% if is_waste %}<input type="hidden" name="waste" value="1">{% endif %}
+    <div class="form-group">
+        <label for="q">Search</label>
+        <input type="text" name="q" id="q" value="{{ q }}" placeholder="Buyer or notes...">
+    </div>
+    <div class="form-group">
+        <label for="date_from">From</label>
+        <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+    </div>
+    <div class="form-group">
+        <label for="date_to">To</label>
+        <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="form-group">
+        <label for="buyer">Buyer</label>
+        <input type="text" name="buyer" id="buyer" value="{{ filters.buyer }}" placeholder="Buyer...">
+    </div>
+    <div class="form-group">
+        <label for="payment_method">Payment</label>
+        <select name="payment_method" id="payment_method">
+            <option value="">All</option>
+            {% for value, label in payment_methods %}
+            <option value="{{ value }}" {% if filters.payment_method == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="crop">Crop</label>
+        <select name="crop" id="crop">
+            <option value="">All</option>
+            {% for c in crops %}
+            <option value="{{ c.pk }}" {% if filters.crop|stringformat:"s" == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="{% if is_waste %}?waste=1{% else %}?{% endif %}" class="btn btn-secondary">Reset</a>
+</form><hr style="margin-top: 14px; height: 1px; border: none; background-color: #cccccc;">
+
+{% if stats %}
+<div class="totals-bar">
+    {% for stat in stats %}
+    <span>{% if is_waste and stat.label == 'Waste Revenue' %}{{ stat.value|as_currency:currency }}{% else %}<strong>{{ stat.value }}</strong>{% endif %} {{ stat.label }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="panel">
+    <table data-no-filter>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Crop</th>
+                <th>Buyer</th>
+                {% if is_waste %}<th>Waste Source</th>{% endif %}
+                <th>{% if is_waste %}Qty Sold{% else %}Quantity{% endif %}</th>
+                <th>Unit</th>
+                {% if is_waste %}
+                <th>Balance</th>
+                <th>Waste Stock</th>
+                {% else %}
+                <th>Unit Price</th>
+                <th>Total</th>
+                {% endif %}
+                <th>Payment</th>
+                <th style="text-align:right;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>{{ sale.sale_date }}</td>
+                <td>{{ sale.harvest.crop_season.crop.name }}</td>
+                <td>{{ sale.buyer|default:"-" }}</td>
+                {% if is_waste %}
+                <td>{{ sale.processing_stage.waste_name|default:sale.harvest.waste_name|default:"-" }}</td>
+                {% endif %}
+                <td>{{ sale.quantity }}</td>
+                <td>{{ sale.unit }}</td>
+                {% if is_waste %}
+                <td>{{ sale.waste_balance|default:"0" }} {{ sale.unit }}</td>
+                <td>{% if sale.processing_stage %}{{ sale.processing_stage.waste_quantity|default:"0" }}{% else %}{{ sale.harvest.waste_quantity|default:"0" }}{% endif %} {{ sale.unit }}</td>
+                {% else %}
+                <td>{{ sale.unit_price|as_currency:currency }}</td>
+                <td>{{ sale.total_amount|as_currency:currency }}</td>
+                {% endif %}
+                <td>{{ sale.get_payment_method_display }}</td>
+                <td style="text-align:right; white-space:nowrap;">
+                    {% if is_waste %}<a class="action-btn view" href="{% url 'waste_detail' pk=sale.pk %}">{% else %}<a class="action-btn view" onclick="openModal('{% url 'sale_detail' pk=sale.pk %}', '{{ view_label }}')" href="javascript:void(0)">{% endif %}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        View
+                    </a>
+                    {% if is_waste %}
+                    <a class="action-btn edit" onclick="openModal('{{ sale.waste_edit_url }}', 'Edit Stock')" href="javascript:void(0)">
+                    {% else %}
+                    <a class="action-btn edit" onclick="openModal('{% url 'model_update' app=app model=model pk=sale.pk %}', 'Edit Sale')" href="javascript:void(0)">
+                    {% endif %}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Edit
+                    </a>
+                    <a class="action-btn delete" onclick="openModal('{% url 'model_delete' app=app model=model pk=sale.pk %}', 'Delete Sale')" href="javascript:void(0)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        Delete
+                    </a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="{% if is_waste %}10{% else %}9{% endif %}" class="empty-state">No sales found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

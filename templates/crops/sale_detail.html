@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if sale.is_waste %}{{ waste_name }} - Waste Sale{% else %}Sale Details{% endif %}</title>
+    <style>
+        :root { --primary: #2d6a4f; --primary-dark: #1b4332; --text: #1f2937; --text-muted: #64748b; --border: #e2e8f0; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; color: var(--text); background: white; padding: 24px; font-size: 0.85rem; }
+        h2 { margin: 0 0 18px; color: var(--primary-dark); font-size: 1.1rem; }
+        .invoice-header { display: flex; justify-content: space-between; margin-bottom: 24px; }
+        .invoice-header h3 { margin: 0 0 8px; font-size: 0.9rem; color: var(--primary-dark); }
+        .invoice-header p { margin: 3px 0; color: var(--text); font-size: 0.82rem; }
+        .invoice-header .muted { color: var(--text-muted); }
+        hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+        table.items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        table.items th { text-align: left; padding: 8px; border-bottom: 2px solid var(--border); font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); }
+        table.items td { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+        table.items td.num, table.totals td.num { text-align: right; }
+        table.totals { width: 260px; margin-left: auto; border-collapse: collapse; }
+        table.totals td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+        table.totals td:first-child { text-align: right; padding-right: 24px; color: var(--text-muted); }
+        table.totals td.total { font-weight: 700; color: var(--primary-dark); border-top: 2px solid var(--border); border-bottom: none; }
+        .notes { margin-top: 20px; }
+        .notes h4 { margin: 0 0 4px; font-size: 0.8rem; color: var(--text-muted); }
+        .notes p { margin: 0; white-space: pre-wrap; }
+        .footer { margin-top: 24px; color: var(--text-muted); font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <h2>{% if sale.is_waste %}{{ waste_name }} Waste Sale Receipt{% else %}Sales Receipt{% endif %}</h2>
+    <div class="invoice-header">
+        <div>
+            <h3>Bill To</h3>
+            <p><strong>{{ sale.buyer|default:"-" }}</strong></p>
+            <p class="muted">Customer</p>
+            <p class="muted">{{ sale.harvest.crop_season.crop.name }}</p>
+        </div>
+        <div>
+            <h3>Ship To</h3>
+            <p><strong>{{ sale.harvest.crop_season.field.name }}</strong></p>
+            <p class="muted">Field / Location</p>
+            <p class="muted">Sale #{{ sale.pk }}</p>
+        </div>
+    </div>
+    <hr>
+    <table class="items">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th style="text-align:right;">Quantity</th>
+                <th style="text-align:right;">Unit Price</th>
+                <th style="text-align:right;">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>
+                    {{ sale.harvest.crop_season.crop.name }} - {{ sale.harvest.get_harvest_type_display }}
+                    {% if sale.processing_stage %}<br><span class="muted">{{ sale.processing_stage.name }}</span>{% endif %}
+                    {% if sale.is_waste %}<br><span class="muted">Waste: {{ waste_name }}</span>{% endif %}
+                </td>
+                <td class="num">{{ sale.quantity }} {{ sale.unit }}</td>
+                <td class="num">{{ currency.symbol|default:"$" }} {{ sale.unit_price|floatformat:2 }}</td>
+                <td class="num">{{ currency.symbol|default:"$" }} {{ sale.total_amount|floatformat:2 }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <table class="totals">
+        <tbody>
+            <tr>
+                <td>Subtotal</td>
+                <td class="num">{{ currency.symbol|default:"$" }} {{ sale.total_amount|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td>Discount</td>
+                <td class="num">{{ currency.symbol|default:"$" }} 0.00</td>
+            </tr>
+            <tr>
+                <td>Shipping</td>
+                <td class="num">{{ currency.symbol|default:"$" }} 0.00</td>
+            </tr>
+            <tr>
+                <td>Tax total</td>
+                <td class="num">{{ currency.symbol|default:"$" }} 0.00</td>
+            </tr>
+            <tr>
+                <td>Other</td>
+                <td class="num">{{ currency.symbol|default:"$" }} 0.00</td>
+            </tr>
+            <tr>
+                <td class="total">Total</td>
+                <td class="num total">{{ currency.symbol|default:"$" }} {{ sale.total_amount|floatformat:2 }}</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="notes">
+        <h4>Notes</h4>
+        <p>{{ sale.notes|default:"No notes" }}</p>
+    </div>
+    <div class="footer">
+        <p>Payment: {{ sale.get_payment_method_display }}</p>
+        <p>Thank you for your business.</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{% extends "reports/report_base.html" %}
+{% block content %}
+<h1>Per Crop Balance Sheet</h1>
+<div class="filters">
+    <form method="get">
+        <label>Select Crop Season:</label>
+        <select name="crop_season">
+            {% for cs in crop_seasons %}
+            <option value="{{ cs.id }}">{{ cs }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">View</button>
+    </form>
+</div>
+<p>Please select a crop season to view its balance sheet.</p>
+{% endblock %}

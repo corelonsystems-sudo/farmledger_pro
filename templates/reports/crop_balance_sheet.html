@@ -1,0 +1,32 @@
+{% extends "reports/report_base.html" %}
+{% block content %}
+<h1>Per Crop Balance Sheet: {{ crop_season }}</h1>
+<div class="export-links">
+    <a href="?export=pdf">Export PDF</a>
+    <a href="?export=csv">Export CSV</a>
+</div>
+
+<h2>Income</h2>
+<table>
+    <tr><th>Description</th><th>Quantity</th><th style="text-align:right">Amount</th></tr>
+    {% for item in income_items %}
+    <tr><td>{{ item.label }}</td><td>{{ item.quantity }} kg</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+    {% endfor %}
+    <tr class="total-row"><td>Total Income</td><td>{{ total_quantity }} kg</td><td style="text-align:right">{{ total_income|as_currency:currency }}</td></tr>
+</table>
+
+<h2>Expenses</h2>
+<table>
+    <tr><th>Category</th><th style="text-align:right">Amount</th></tr>
+    {% for item in expense_items %}
+    <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+    {% endfor %}
+    <tr class="total-row"><td>Total Expenses</td><td style="text-align:right">{{ total_expenses|as_currency:currency }}</td></tr>
+</table>
+
+<table>
+    <tr class="total-row"><td>Net Profit</td><td style="text-align:right" class="{% if net_profit >= 0 %}positive{% else %}negative{% endif %}">{{ net_profit|as_currency:currency }}</td></tr>
+    <tr><td>Total Quantity Produced</td><td>{{ total_quantity }} kg</td></tr>
+    <tr><td>Cost per kg</td><td>{{ cost_per_kg|as_currency:currency }}/kg</td></tr>
+</table>
+{% endblock %}

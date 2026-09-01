@@ -1,0 +1,783 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ report_title }} - FarmLedger Pro{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+        :root {
+            --primary: #2d6a4f;
+            --primary-dark: #1b4332;
+            --primary-light: #40916c;
+            --bg: #f1f5f9;
+            --surface: #ffffff;
+            --text: #1f2937;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #f59e0b;
+            --red: #ef4444;
+            --blue: #3b82f6;
+            --green: #22c55e;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .top-nav {
+            background: #333;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            height: 48px;
+            border-bottom: 1px solid #444;
+        }
+        .top-nav .brand {
+            display: flex; align-items: center; gap: 10px;
+            font-size: 1.15rem; font-weight: 800;
+            text-decoration: none; color: white;
+            letter-spacing: -0.01em;
+        }
+        .top-nav .brand svg { width: 26px; height: 26px; }
+        .top-nav .primary-menu {
+            display: flex; list-style: none; margin: 0 0 0 auto; padding: 0; gap: 0;
+            height: 100%;
+        }
+        .top-nav .primary-menu a {
+            display: flex; align-items: center;
+            padding: 0 18px; color: rgba(255,255,255,0.85);
+            text-decoration: none; font-size: 0.85rem; font-weight: 500;
+            height: 100%; border-bottom: 3px solid transparent;
+            transition: all 0.15s ease;
+        }
+        .top-nav .primary-menu a:hover, .top-nav .primary-menu a.active {
+            background: rgba(255,255,255,0.1); color: white;
+            border-bottom-color: #fff;
+        }
+        .sub-nav {
+            background: #f8f9fa;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center;
+            padding: 0 24px; height: 44px;
+        }
+        .sub-nav .secondary-menu {
+            display: flex; list-style: none; margin: 0; padding: 0; gap: 22px;
+            overflow-x: auto; white-space: nowrap;
+            width: 100%;
+        }
+        .sub-nav .secondary-menu a {
+            color: var(--text); text-decoration: none;
+            font-size: 0.84rem; font-weight: 500;
+            padding: 6px 0; border-bottom: 2px solid transparent;
+            transition: all 0.15s ease;
+        }
+        .sub-nav .secondary-menu a:hover {
+            color: var(--primary); border-bottom-color: var(--primary);
+        }
+        .user-pill {
+            margin-left: auto;
+            background: rgba(255,255,255,0.1);
+            color: white; padding: 4px 12px;
+            border-radius: 14px; font-size: 0.78rem;
+        }
+        .main {
+            flex: 1;
+            padding: 20px 26px; min-height: auto;
+        }
+        .topbar {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 16px;
+        }
+        .topbar h1 { margin: 0; font-size: 1.2rem; color: var(--primary-dark); }
+        .topbar .meta { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 0.82rem; }
+        .pill {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 16px; padding: 4px 12px;
+            display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex; gap: 4px; margin-bottom: 16px;
+            border-bottom: 2px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 8px 16px; cursor: pointer;
+            font-size: 0.82rem; font-weight: 600;
+            color: var(--text-muted); border: none; background: none;
+            border-bottom: 2px solid transparent; margin-bottom: -2px;
+            border-radius: 6px 6px 0 0;
+        }
+        .tab:hover { color: var(--primary); background: rgba(45,106,79,0.05); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px; margin-bottom: 16px;
+        }
+        .stat-card {
+            background: transparent;
+            border: none;
+            border-right: 1px solid #9ca3af;
+            padding: 14px;
+        }
+        .stat-card:last-child { border-right: none; }
+        .stat-card .stat-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+        .stat-card .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--primary-dark); margin-top: 4px; }
+        .stat-card .stat-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 14px; margin-bottom: 16px;
+        }
+        .chart-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .chart-card h3 { margin: 0 0 10px; font-size: 0.88rem; color: var(--text); }
+        .chart-card canvas { max-height: 260px; }
+
+        .panel {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px; margin-bottom: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .panel h3 { margin: 0 0 10px; font-size: 0.9rem; color: var(--text); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; color: var(--text-muted); font-size: 0.7rem; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.03em; }
+        td { padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #f8fafc; }
+        .total-row { font-weight: 700; background: #f0fdf4; }
+        .positive { color: var(--green); font-weight: 600; }
+        .negative { color: var(--red); font-weight: 600; }
+
+        .filters {
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .filters label { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+        .filters input, .filters select {
+            padding: 6px 10px; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.82rem;
+        }
+        .filters button {
+            padding: 7px 16px; background: var(--primary); color: white;
+            border: none; border-radius: 6px; cursor: pointer;
+            font-size: 0.8rem; font-weight: 600;
+        }
+        .filters button:hover { background: var(--primary-dark); }
+
+        .export-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+        .export-bar a {
+            padding: 6px 14px; border-radius: 6px; text-decoration: none;
+            font-size: 0.78rem; font-weight: 600; border: 1px solid var(--border);
+            background: var(--surface); color: var(--text);
+        }
+        .export-bar a:hover { border-color: var(--primary); color: var(--primary); }
+
+        .empty { text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem; }
+        .muted { color: var(--text-muted); }
+
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; }
+        }
+        hr { border: none; border-top: 1px solid #9ca3af; margin: 12px 0; }
+        body { flex-direction: row; }
+    </style>
+{% endblock %}
+{% block content %}
+        <div class="topbar">
+            <h1>Reports Dashboard</h1>
+            <div class="meta">
+                <!-- <span class="pill">{{ request.user.username|default:"Admin" }}</span> -->
+            </div>
+        </div>
+
+        <!-- Tab navigation -->
+        <div class="tabs">
+            <button class="tab {% if tab == 'overview' %}active{% endif %}" onclick="switchTab('overview')">Overview</button>
+            <button class="tab {% if tab == 'pl' %}active{% endif %}" onclick="switchTab('pl')">Profit &amp; Loss</button>
+            <button class="tab {% if tab == 'cashflow' %}active{% endif %}" onclick="switchTab('cashflow')">Cash Flow</button>
+            <button class="tab {% if tab == 'schedulef' %}active{% endif %}" onclick="switchTab('schedulef')">Schedule F</button>
+            <button class="tab {% if tab == 'crop' %}active{% endif %}" onclick="switchTab('crop')">Crop Balance</button>
+            <button class="tab {% if tab == 'budget' %}active{% endif %}" onclick="switchTab('budget')">Budget vs Actual</button>
+            <button class="tab {% if tab == 'equipment' %}active{% endif %}" onclick="switchTab('equipment')">Equipment</button>
+            <button class="tab {% if tab == 'inventory' %}active{% endif %}" onclick="switchTab('inventory')">Inventory</button>
+            <button class="tab {% if tab == 'labor' %}active{% endif %}" onclick="switchTab('labor')">Labor</button>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div class="tab-content {% if tab == 'overview' %}active{% endif %}" id="tab-overview">
+            <hr>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Revenue</div>
+                    <div class="stat-value">{{ total_revenue|as_currency:currency }}</div>
+                    <div class="stat-sub">{{ harvest_count }} harvests</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Expenses</div>
+                    <div class="stat-value">{{ total_expenses|as_currency:currency }}</div>
+                    <div class="stat-sub">{{ expense_count }} expenses</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Net Profit</div>
+                    <div class="stat-value {% if net_profit >= 0 %}positive{% else %}negative{% endif %}">{{ net_profit|as_currency:currency }}</div>
+                    <div class="stat-sub">{% if net_profit >= 0 %}Surplus{% else %}Deficit{% endif %}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Budgets</div>
+                    <div class="stat-value">{{ budget_count }}</div>
+                    <div class="stat-sub">{{ crop_count }} crops, {{ field_count }} fields</div>
+                </div>
+            </div><hr>
+
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Monthly Revenue vs Expenses</h3>
+                    <canvas id="chartMonthly"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Expenses by Category</h3>
+                    <canvas id="chartExpCat"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Revenue by Crop</h3>
+                    <canvas id="chartRevCrop"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Crop Season Profitability</h3>
+                    <canvas id="chartCropProfit"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- P&L TAB -->
+        <div class="tab-content {% if tab == 'pl' %}active{% endif %}" id="tab-pl">
+            <div class="filters">
+                <form method="get" id="plForm">
+                    <input type="hidden" name="tab" value="pl">
+                    <label>Crop Season:</label>
+                    <select name="crop_season">
+                        <option value="">All Seasons</option>
+                        {% for cs in crop_seasons %}
+                        <option value="{{ cs.id }}" {% if selected_season_id == cs.id %}selected{% endif %}>{{ cs.crop.name }} - {{ cs.field.name }} ({{ cs.planting_date.year }})</option>
+                        {% endfor %}
+                    </select>
+                    <label>From:</label>
+                    <input type="date" name="start_date" value="{{ start_date }}">
+                    <label>To:</label>
+                    <input type="date" name="end_date" value="{{ end_date }}">
+                    <button type="submit">Apply</button>
+                </form>
+            </div>
+            <div class="export-bar">
+                <a href="/reports/profit-loss/?export=pdf{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export PDF</a>
+                <a href="/reports/profit-loss/?export=csv{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export CSV</a>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Income vs Expenses</h3>
+                    <canvas id="chartPL"></canvas>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Income</h3>
+                <table>
+                    <thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+                    <tbody>
+                        {% for item in pl_data.income_items %}
+                        <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="muted">No income records.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot><tr class="total-row"><td>Total Income</td><td style="text-align:right">{{ pl_data.total_income|as_currency:currency }}</td></tr></tfoot>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Expenses</h3>
+                <table>
+                    <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                    <tbody>
+                        {% for item in pl_data.expense_items %}
+                        <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="muted">No expense records.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot><tr class="total-row"><td>Total Expenses</td><td style="text-align:right">{{ pl_data.total_expenses|as_currency:currency }}</td></tr></tfoot>
+                </table>
+            </div>
+            <div class="panel">
+                <table>
+                    <tr class="total-row">
+                        <td>Net Profit</td>
+                        <td style="text-align:right" class="{% if pl_data.net_profit >= 0 %}positive{% else %}negative{% endif %}">{{ pl_data.net_profit|as_currency:currency }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- CASH FLOW TAB -->
+        <div class="tab-content {% if tab == 'cashflow' %}active{% endif %}" id="tab-cashflow">
+            <div class="filters">
+                <form method="get">
+                    <input type="hidden" name="tab" value="cashflow">
+                    <label>From:</label>
+                    <input type="date" name="start_date" value="{{ start_date }}">
+                    <label>To:</label>
+                    <input type="date" name="end_date" value="{{ end_date }}">
+                    <button type="submit">Apply</button>
+                </form>
+            </div>
+            <div class="export-bar">
+                <a href="/reports/cash-flow/?export=pdf{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export PDF</a>
+                <a href="/reports/cash-flow/?export=csv{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}">Export CSV</a>
+            </div>
+            <hr>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Final Balance</div>
+                    <div class="stat-value {% if cash_flow_data.final_balance >= 0 %}positive{% else %}negative{% endif %}">{{ cash_flow_data.final_balance|as_currency:currency }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Transactions</div>
+                    <div class="stat-value">{{ cash_flow_data.transactions|length }}</div>
+                </div>
+            </div><hr>
+            <div class="chart-card" style="margin-bottom:14px;">
+                <h3>Cash Flow Over Time</h3>
+                <canvas id="chartCashFlow"></canvas>
+            </div>
+            <div class="panel">
+                <h3>Transactions</h3>
+                <table>
+                    <thead><tr><th>Date</th><th>Description</th><th>Type</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th></tr></thead>
+                    <tbody>
+                        {% for t in cash_flow_data.transactions %}
+                        <tr>
+                            <td>{{ t.date }}</td>
+                            <td>{{ t.description }}</td>
+                            <td>{{ t.type }}</td>
+                            <td style="text-align:right" class="{% if t.type == 'Income' %}positive{% else %}negative{% endif %}">{{ t.amount|as_currency:currency }}</td>
+                            <td style="text-align:right">{{ t.running_balance|as_currency:currency }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="muted">No transactions.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- SCHEDULE F TAB -->
+        <div class="tab-content {% if tab == 'schedulef' %}active{% endif %}" id="tab-schedulef">
+            <div class="filters">
+                <form method="get">
+                    <input type="hidden" name="tab" value="schedulef">
+                    <label>Year:</label>
+                    <input type="number" name="year" value="{{ year }}" placeholder="e.g. 2025">
+                    <button type="submit">Apply</button>
+                </form>
+            </div>
+            <div class="export-bar">
+                <a href="/reports/schedule-f/?export=pdf{% if year %}&year={{ year }}{% endif %}">Export PDF</a>
+                <a href="/reports/schedule-f/?export=csv{% if year %}&year={{ year }}{% endif %}">Export CSV</a>
+            </div>
+            <div class="chart-card" style="margin-bottom:14px;">
+                <h3>Expenses by Schedule F Line</h3>
+                <canvas id="chartScheduleF"></canvas>
+            </div>
+            <div class="panel">
+                <h3>Schedule F Line Items</h3>
+                <table>
+                    <thead><tr><th>Schedule F Line</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                    <tbody>
+                        {% for item in schedule_f_data.line_items %}
+                        <tr><td>{{ item.schedule_f_line }}</td><td>{{ item.category }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="muted">No data.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot><tr class="total-row"><td colspan="2">Total</td><td style="text-align:right">{{ schedule_f_data.total|as_currency:currency }}</td></tr></tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- CROP BALANCE TAB -->
+        <div class="tab-content {% if tab == 'crop' %}active{% endif %}" id="tab-crop">
+            <div class="filters">
+                <form method="get">
+                    <input type="hidden" name="tab" value="crop">
+                    <label>Crop Season:</label>
+                    <select name="crop_season">
+                        {% for cs in crop_seasons %}
+                        <option value="{{ cs.id }}" {% if selected_season_id == cs.id %}selected{% endif %}>{{ cs.crop.name }} - {{ cs.field.name }} ({{ cs.planting_date.year }})</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit">Apply</button>
+                </form>
+            </div>
+            {% if balance_sheet %}
+            <div class="export-bar">
+                <a href="/reports/crop-balance-sheet/{{ selected_season_id }}/?export=pdf">Export PDF</a>
+                <a href="/reports/crop-balance-sheet/{{ selected_season_id }}/?export=csv">Export CSV</a>
+            </div>
+            <hr>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Income</div>
+                    <div class="stat-value">{{ balance_sheet.total_income|as_currency:currency }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Expenses</div>
+                    <div class="stat-value">{{ balance_sheet.total_expenses|as_currency:currency }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Net Profit</div>
+                    <div class="stat-value {% if balance_sheet.net_profit >= 0 %}positive{% else %}negative{% endif %}">{{ balance_sheet.net_profit|as_currency:currency }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cost per kg</div>
+                    <div class="stat-value">{{ balance_sheet.cost_per_kg|as_currency:currency }}</div>
+                </div>
+            </div><hr>
+            <div class="chart-card" style="margin-bottom:14px;">
+                <h3>Income vs Expenses for {{ balance_sheet.crop_season }}</h3>
+                <canvas id="chartCropBalance"></canvas>
+            </div>
+            <div class="panel">
+                <h3>Income Breakdown</h3>
+                <table>
+                    <thead><tr><th>Description</th><th>Quantity</th><th style="text-align:right">Amount</th></tr></thead>
+                    <tbody>
+                        {% for item in balance_sheet.income_items %}
+                        <tr><td>{{ item.label }}</td><td>{{ item.quantity }} kg</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="muted">No income.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Expense Breakdown</h3>
+                <table>
+                    <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+                    <tbody>
+                        {% for item in balance_sheet.expense_items %}
+                        <tr><td>{{ item.label }}</td><td style="text-align:right">{{ item.amount|as_currency:currency }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="muted">No expenses.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty">No crop seasons found.</div>
+            {% endif %}
+        </div>
+
+        <!-- BUDGET VS ACTUAL TAB -->
+        <div class="tab-content {% if tab == 'budget' %}active{% endif %}" id="tab-budget">
+            <div class="chart-card" style="margin-bottom:14px;">
+                <h3>Budget Planned vs Spent</h3>
+                <canvas id="chartBudget"></canvas>
+            </div>
+            <div class="panel">
+                <h3>Budget Items Detail</h3>
+                <table>
+                    <thead><tr><th>Budget - Category</th><th style="text-align:right">Planned</th><th style="text-align:right">Spent</th><th style="text-align:right">Remaining</th></tr></thead>
+                    <tbody>
+                        {% for item in budget_vs_actual_json|default:'[]' %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div id="budgetTableBody"></div>
+            </div>
+        </div>
+
+        <!-- EQUIPMENT TAB -->
+        <div class="tab-content {% if tab == 'equipment' %}active{% endif %}" id="tab-equipment">
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Equipment Purchase vs Maintenance Cost</h3>
+                    <canvas id="chartEquipment"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- INVENTORY TAB -->
+        <div class="tab-content {% if tab == 'inventory' %}active{% endif %}" id="tab-inventory">
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Inventory Value by Item</h3>
+                    <canvas id="chartInventory"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- LABOR TAB -->
+        <div class="tab-content {% if tab == 'labor' %}active{% endif %}" id="tab-labor">
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Worker Hourly Rates</h3>
+                    <canvas id="chartLabor"></canvas>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script>
+        var currencySymbol = '{{ currency.symbol|escapejs }}';
+        var currencyRate = {{ currency.rate }};
+        // Tab switching
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+            // Update URL without reload
+            var url = new URL(window.location);
+            url.searchParams.set('tab', name);
+            window.history.replaceState({}, '', url);
+        }
+
+        // Chart data from Django
+        var expenseByCat = {{ expense_by_cat_json|safe }};
+        var revenueByCrop = {{ revenue_by_crop_json|safe }};
+        var monthlyExpenses = {{ monthly_expenses_json|safe }};
+        var monthlyRevenue = {{ monthly_revenue_json|safe }};
+        var budgetVsActual = {{ budget_vs_actual_json|safe }};
+        var cropProfit = {{ crop_profit_json|safe }};
+        var equipmentCosts = {{ equipment_costs_json|safe }};
+        var inventoryValue = {{ inventory_value_json|safe }};
+        var workerCosts = {{ worker_costs_json|safe }};
+
+        var monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        // Colors
+        var palette = ['#2d6a4f','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#6366f1'];
+
+        // --- Overview charts ---
+        var chartMonthlyEl = document.getElementById('chartMonthly');
+        if (chartMonthlyEl) {
+            new Chart(chartMonthlyEl, {
+                type: 'line',
+                data: {
+                    labels: monthLabels,
+                    datasets: [
+                        { label: 'Revenue', data: monthlyRevenue, borderColor: '#2d6a4f', backgroundColor: 'rgba(45,106,79,0.05)', fill: true, tension: 0.3, borderWidth: 1.5 },
+                        { label: 'Expenses', data: monthlyExpenses, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.05)', fill: true, tension: 0.3, borderWidth: 1.5 },
+                    ]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        var chartExpCatEl = document.getElementById('chartExpCat');
+        if (chartExpCatEl) {
+            new Chart(chartExpCatEl, {
+                type: 'doughnut',
+                data: {
+                    labels: expenseByCat.map(function(d) { return d.label; }),
+                    datasets: [{ data: expenseByCat.map(function(d) { return d.amount; }), backgroundColor: palette }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'right' } } }
+            });
+        }
+
+        var chartRevCropEl = document.getElementById('chartRevCrop');
+        if (chartRevCropEl) {
+            new Chart(chartRevCropEl, {
+                type: 'bar',
+                data: {
+                    labels: revenueByCrop.map(function(d) { return d.label; }),
+                    datasets: [{ label: 'Revenue', data: revenueByCrop.map(function(d) { return d.amount; }), backgroundColor: '#3b82f6' }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        var chartCropProfitEl = document.getElementById('chartCropProfit');
+        if (chartCropProfitEl) {
+            new Chart(chartCropProfitEl, {
+                type: 'bar',
+                data: {
+                    labels: cropProfit.map(function(d) { return d.label; }),
+                    datasets: [
+                        { label: 'Revenue', data: cropProfit.map(function(d) { return d.revenue; }), backgroundColor: '#22c55e' },
+                        { label: 'Expenses', data: cropProfit.map(function(d) { return d.expenses; }), backgroundColor: '#ef4444' },
+                    ]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // --- P&L chart ---
+        var chartPLEl = document.getElementById('chartPL');
+        if (chartPLEl) {
+            new Chart(chartPLEl, {
+                type: 'bar',
+                data: {
+                    labels: ['Income', 'Expenses', 'Net Profit'],
+                    datasets: [{
+                        data: [
+                            {{ pl_data.total_income|default:"0" }},
+                            {{ pl_data.total_expenses|default:"0" }},
+                            {{ pl_data.net_profit|default:"0" }}
+                        ],
+                        backgroundColor: ['#22c55e', '#ef4444', {% if pl_data.net_profit >= 0 %}'#2d6a4f'{% else %}'#ef4444'{% endif %}]
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        // --- Cash flow chart ---
+        var chartCashFlowEl = document.getElementById('chartCashFlow');
+        if (chartCashFlowEl) {
+            var cfData = {{ cash_flow_data.transactions|safe|default:"[]" }};
+            // Build from template data - use inline rendering
+            var cfDates = [];
+            var cfBalances = [];
+            {% for t in cash_flow_data.transactions %}
+            cfDates.push('{{ t.date }}');
+            cfBalances.push({{ t.running_balance|default:"0" }});
+            {% endfor %}
+            new Chart(chartCashFlowEl, {
+                type: 'line',
+                data: {
+                    labels: cfDates,
+                    datasets: [{ label: 'Running Balance', data: cfBalances, borderColor: '#2d6a4f', fill: true, backgroundColor: 'rgba(45,106,79,0.1)' }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        // --- Schedule F chart ---
+        var chartScheduleFEl = document.getElementById('chartScheduleF');
+        if (chartScheduleFEl) {
+            var sfLabels = [];
+            var sfAmounts = [];
+            {% for item in schedule_f_data.line_items %}
+            sfLabels.push('{{ item.schedule_f_line|escapejs }}');
+            sfAmounts.push({{ item.amount|default:"0" }});
+            {% endfor %}
+            new Chart(chartScheduleFEl, {
+                type: 'bar',
+                data: {
+                    labels: sfLabels,
+                    datasets: [{ label: 'Amount', data: sfAmounts, backgroundColor: palette }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 45, minRotation: 45 } } } }
+            });
+        }
+
+        // --- Crop balance chart ---
+        var chartCropBalanceEl = document.getElementById('chartCropBalance');
+        if (chartCropBalanceEl) {
+            new Chart(chartCropBalanceEl, {
+                type: 'bar',
+                data: {
+                    labels: ['Income', 'Expenses', 'Net Profit'],
+                    datasets: [{
+                        data: [
+                            {{ balance_sheet.total_income|default:"0" }},
+                            {{ balance_sheet.total_expenses|default:"0" }},
+                            {{ balance_sheet.net_profit|default:"0" }}
+                        ],
+                        backgroundColor: ['#22c55e', '#ef4444', {% if balance_sheet.net_profit >= 0 %}'#2d6a4f'{% else %}'#ef4444'{% endif %}]
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        // --- Budget vs Actual chart ---
+        var chartBudgetEl = document.getElementById('chartBudget');
+        if (chartBudgetEl) {
+            new Chart(chartBudgetEl, {
+                type: 'bar',
+                data: {
+                    labels: budgetVsActual.map(function(d) { return d.label; }),
+                    datasets: [
+                        { label: 'Planned', data: budgetVsActual.map(function(d) { return d.planned; }), backgroundColor: '#3b82f6' },
+                        { label: 'Spent', data: budgetVsActual.map(function(d) { return d.spent; }), backgroundColor: '#ef4444' },
+                    ]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } }, scales: { x: { ticks: { maxRotation: 45, minRotation: 45 } } } }
+            });
+            // Populate table
+            var tbody = '';
+            budgetVsActual.forEach(function(d) {
+                var remaining = d.planned - d.spent;
+                var cls = remaining >= 0 ? 'positive' : 'negative';
+                tbody += '<tr><td>' + d.label + '</td><td style="text-align:right">' + currencySymbol + ' ' + (d.planned * currencyRate).toFixed(2) + '</td><td style="text-align:right">' + currencySymbol + ' ' + (d.spent * currencyRate).toFixed(2) + '</td><td style="text-align:right" class="' + cls + '">' + currencySymbol + ' ' + (remaining * currencyRate).toFixed(2) + '</td></tr>';
+            });
+            var tableBody = document.getElementById('budgetTableBody');
+            if (tableBody) tableBody.innerHTML = '<table><thead><tr><th>Budget - Category</th><th style="text-align:right">Planned</th><th style="text-align:right">Spent</th><th style="text-align:right">Remaining</th></tr></thead><tbody>' + tbody + '</tbody></table>';
+        }
+
+        // --- Equipment chart ---
+        var chartEquipmentEl = document.getElementById('chartEquipment');
+        if (chartEquipmentEl) {
+            new Chart(chartEquipmentEl, {
+                type: 'bar',
+                data: {
+                    labels: equipmentCosts.map(function(d) { return d.label; }),
+                    datasets: [
+                        { label: 'Purchase Cost', data: equipmentCosts.map(function(d) { return d.purchase; }), backgroundColor: '#3b82f6' },
+                        { label: 'Maintenance', data: equipmentCosts.map(function(d) { return d.maintenance; }), backgroundColor: '#f59e0b' },
+                    ]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // --- Inventory chart ---
+        var chartInventoryEl = document.getElementById('chartInventory');
+        if (chartInventoryEl) {
+            new Chart(chartInventoryEl, {
+                type: 'doughnut',
+                data: {
+                    labels: inventoryValue.map(function(d) { return d.label; }),
+                    datasets: [{ data: inventoryValue.map(function(d) { return d.value; }), backgroundColor: palette }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'right' } } }
+            });
+        }
+
+        // --- Labor chart ---
+        var chartLaborEl = document.getElementById('chartLabor');
+        if (chartLaborEl) {
+            new Chart(chartLaborEl, {
+                type: 'bar',
+                data: {
+                    labels: workerCosts.map(function(d) { return d.label; }),
+                    datasets: [{ label: 'Hourly Rate', data: workerCosts.map(function(d) { return d.rate; }), backgroundColor: '#2d6a4f' }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+    </script>
+{% endblock %}
