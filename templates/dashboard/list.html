@@ -3,6 +3,28 @@
 {% block breadcrumbs %}{{ model_name }}{% endblock %}
 {% block nav_schedule_lines %}{% if app == 'expenses' and model == 'scheduleline' %}active{% endif %}{% endblock %}
 {% block nav_subcodes %}{% if app == 'expenses' and model == 'budgetsubcode' %}active{% endif %}{% endblock %}
+{% block nav_livestock %}{% if app == 'livestock' and model == 'animalspecies' %}active{% endif %}{% endblock %}
+{% block nav_animal_groups %}{% if app == 'livestock' and model == 'animalgroup' %}active{% endif %}{% endblock %}
+{% block nav_animal_records %}{% if app == 'livestock' and model == 'animalrecord' %}active{% endif %}{% endblock %}
+{% block nav_health_records %}{% if app == 'livestock' and model == 'animalhealthrecord' %}active{% endif %}{% endblock %}
+{% block nav_breeding %}{% if app == 'livestock' and model == 'breedingrecord' %}active{% endif %}{% endblock %}
+{% block nav_feed_logs %}{% if app == 'livestock' and model == 'animalfeedlog' %}active{% endif %}{% endblock %}
+{% block nav_milk %}{% if app == 'livestock' and model == 'milkproductionrecord' %}active{% endif %}{% endblock %}
+{% block nav_poultry %}{% if app == 'livestock' and model == 'poultrybatch' %}active{% endif %}{% endblock %}
+{% block nav_eggs %}{% if app == 'livestock' and model == 'eggproductionrecord' %}active{% endif %}{% endblock %}
+{% block nav_poultry_feed %}{% if app == 'livestock' and model == 'poultryfeedlog' %}active{% endif %}{% endblock %}
+{% block nav_poultry_health %}{% if app == 'livestock' and model == 'poultryhealthrecord' %}active{% endif %}{% endblock %}
+{% block nav_parcels %}{% if app == 'fields' and model == 'landparcel' %}active{% endif %}{% endblock %}
+{% block nav_maintenance %}{% if app == 'equipment' and model == 'maintenancelog' %}active{% endif %}{% endblock %}
+{% block nav_equipment_usage %}{% if app == 'equipment' and model == 'equipmentusage' %}active{% endif %}{% endblock %}
+{% block nav_stock_txns %}{% if app == 'inventory' and model == 'inventorytransaction' %}active{% endif %}{% endblock %}
+{% block nav_alerts %}{% if app == 'inventory' and model == 'inventoryalert' %}active{% endif %}{% endblock %}
+{% block nav_tasks %}{% if app == 'labor' and model == 'task' %}active{% endif %}{% endblock %}
+{% block nav_attendance %}{% if app == 'labor' and model == 'attendancerecord' %}active{% endif %}{% endblock %}
+{% block nav_payroll %}{% if app == 'labor' and model == 'payrollrun' %}active{% endif %}{% endblock %}
+{% block nav_budget_items %}{% if app == 'budgets' and model == 'budgetitem' %}active{% endif %}{% endblock %}
+{% block nav_income_plans %}{% if app == 'budgets' and model == 'budgetincomeplan' %}active{% endif %}{% endblock %}
+{% block nav_bank_txns %}{% if app == 'integrations' and model == 'banktransaction' %}active{% endif %}{% endblock %}
 
 {% block extra_head %}
 <style>

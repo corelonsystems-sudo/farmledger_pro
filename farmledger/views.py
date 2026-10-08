@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import FieldError, PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db.models.deletion import ProtectedError
-from django.db.models import Count, F, Max, Q, Sum, Value, DecimalField, OuterRef, Subquery
+from django.db.models import Avg, Count, F, Max, Q, Sum, Value, DecimalField, OuterRef, Subquery
 from django.db.models.functions import Coalesce, Lower
 from django.forms import modelform_factory
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
@@ -1362,7 +1362,7 @@ def _field_list(request, app, model):
     status = request.GET.get('status', '')
 
     queryset = scoped_queryset(Field, request.user, Field.objects.annotate(
-        season_count=Count('seasons', distinct=True),
+        season_count=Count('crop_seasons', distinct=True),
         parcel_count=Count('parcels', distinct=True),
     )).order_by('name')
 
@@ -1532,11 +1532,11 @@ def _worker_list(request, app, model):
         worker__farm_profile__in=accessible_farms(request.user),
         date__gte=month_start,
     ).aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']
-    rates = [w for w in queryset if w.hourly_rate]
     stats = {
         'total_count': queryset.count(),
         'active': queryset.filter(is_active=True).count(),
-        'avg_rate': (sum((w.hourly_rate for w in rates), Decimal('0')) / len(rates)) if rates else Decimal('0'),
+        'avg_rate': queryset.filter(hourly_rate__gt=0).aggregate(
+            a=Avg('hourly_rate'))['a'] or Decimal('0'),
         'month_hours': month_hours,
     }
 
