@@ -1,0 +1,175 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Budget Codes - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Budget Codes{% endblock %}
+{% block nav_codes %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Budget Codes</h2>
+        <p>Spending categories mapped to budget schedule lines, used by budgets and expenses.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Budget Code">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Code
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Total Codes</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.with_items }}</div>
+            <div class="kpi-label">Used in Budgets</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_planned|as_currency:currency }}</div>
+            <div class="kpi-label">Planned</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_spent|as_currency:currency }}</div>
+            <div class="kpi-label">Spent</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.schedule_f or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.schedule_f or q %}<span class="active-count">Active</span>{% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Code or name...">
+        </div>
+        <div class="form-group">
+            <label for="schedule_f">Budget Schedule Line</label>
+            <select name="schedule_f" id="schedule_f">
+                <option value="">All Lines</option>
+                {% for value, label in schedule_f_lines %}
+                <option value="{{ value }}" {% if filters.schedule_f == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Budget Codes</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} code{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if codes %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Budget Schedule Line</th>
+                    <th class="num">Subcodes</th>
+                    <th class="num">Items</th>
+                    <th class="num">Planned</th>
+                    <th class="num">Spent</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for code in codes %}
+                <tr>
+                    <td>{% if code.code %}<span class="code-badge">{{ code.code }}</span>{% else %}-{% endif %}</td>
+                    <td>
+                        <a class="link" href="{% url 'budget_code_detail' code.pk %}">{{ code.name }}</a>
+                        {% if code.description %}<div class="sub-text">{{ code.description|truncatewords:12 }}</div>{% endif %}
+                    </td>
+                    <td>{{ code.get_schedule_f_line_display }}</td>
+                    <td class="num">{{ code.subcode_count }}</td>
+                    <td class="num">{{ code.item_count }}</td>
+                    <td class="num amount">{{ code.planned|as_currency:currency }}</td>
+                    <td class="num amount">{{ code.spent|as_currency:currency }}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn view" href="{% url 'budget_code_detail' code.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=code.pk %}" data-modal-title="Edit Budget Code" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=code.pk %}" data-modal-title="Delete Budget Code" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <p>No budget codes found</p>
+        <span>Try adjusting your filters, or add a new code.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

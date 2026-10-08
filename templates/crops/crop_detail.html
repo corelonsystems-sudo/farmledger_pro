@@ -1,0 +1,764 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ crop.name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='crops' model='crop' %}">Crops</a> &rsaquo; {{ crop.name }}{% endblock %}
+{% block nav_crops %}active{% endblock %}
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .item-name { font-weight: 600; }
+    .stock-flow-filters {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+        align-items: center;
+    }
+    .stock-flow-filters select,
+    .stock-flow-filters input {
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.82rem;
+        background: white;
+        color: var(--text);
+        min-width: 140px;
+    }
+    .stock-flow-filters input { flex: 1; min-width: 180px; }
+    .stock-flow-filters select:focus,
+    .stock-flow-filters input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(45,106,79,0.08);
+    }
+    .charts-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 20px;
+        align-items: start;
+    }
+    @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+    .chart-box h3 {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 10px;
+        margin: 0 0 14px;
+        color: var(--primary-dark);
+        font-weight: 700;
+        font-size: 0.95rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .chart-box h3 a {
+        font-size: 0.72rem;
+        font-weight: 500;
+        color: var(--primary);
+        text-decoration: underline;
+        cursor: pointer;
+    }
+    .chart-summary {
+        display: none;
+        background: #f6f7f5;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        font-size: 0.78rem;
+        line-height: 1.5;
+    }
+    .meta-pill {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        background: #f1f5f9;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .stage-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        font-size: 0.82rem;
+        margin-top: 8px;
+    }
+    .stage-detail-grid strong {
+        display: block;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        margin-bottom: 3px;
+        font-weight: 600;
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{% if crop.name %}{{ crop.name|first|upper }}{% else %}C{% endif %}</div>
+        <div class='profile-name'>
+            <h1>{{ crop.name }}</h1>
+            <div class='profile-meta'>
+                {% if crop.scientific_name %}<em>{{ crop.scientific_name }}</em> &bull; {% endif %}
+                {{ crop.default_unit }}
+                {% if crop.growing_season_days %}&bull; {{ crop.growing_season_days }} growing days{% endif %}
+                {% if crop.is_perennial %}&bull; Perennial, {{ crop.perennial_lifespan_years }} yrs{% endif %}
+            </div>
+            <span class="pill-badge pill-green">{{ crop.category|title }}</span>
+            {% if crop.is_perennial %}<span class="pill-badge pill-teal">Perennial</span>{% endif %}
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <span class='id-badge'>CRP-{{ crop.pk|stringformat:"05d" }}</span>
+        <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_update' app='crops' model='crop' pk=crop.pk %}?next={{ request.path }}" data-modal-title="Edit Crop">Edit Crop</a>
+        <a class='btn btn-primary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='cropseason' %}?crop={{ crop.pk }}&next={{ request.path }}" data-modal-title="New Season">+ Add Season</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_delete' app='crops' model='crop' pk=crop.pk %}" data-modal-title="Delete Crop">Delete</a>
+    </div>
+</div>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+        <div><div class="kpi-value">{{ total_seasons }}</div><div class="kpi-label">Seasons</div></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 0 0-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg></div>
+        <div><div class="kpi-value">{{ total_harvests }}</div><div class="kpi-label">Harvests</div></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>
+        <div><div class="kpi-value">{{ total_harvested }} {{ crop.default_unit }}</div><div class="kpi-label">Total Harvested</div></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg></div>
+        <div><div class="kpi-value">{{ quantity_in_store }} {{ crop.default_unit }}</div><div class="kpi-label">Raw in Store</div></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></div>
+        <div><div class="kpi-value">{{ total_revenue|as_currency:currency }}</div><div class="kpi-label">Sales Revenue</div></div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon {% if net_profit < 0 %}red{% else %}green{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+        <div><div class="kpi-value {% if net_profit < 0 %}profit-neg{% else %}profit-pos{% endif %}">{{ net_profit|as_currency:currency }}</div><div class="kpi-label">Net Profit</div></div>
+    </div>
+</div>
+
+<div class='tab-bar'>
+    <button class='crop-tab active' data-tab='overview' onclick='switchCropTab("overview")'>Overview</button>
+    <button class='crop-tab' data-tab='seasons' onclick='switchCropTab("seasons")'>Seasons</button>
+    <button class='crop-tab' data-tab='harvests' onclick='switchCropTab("harvests")'>Harvests</button>
+    <button class='crop-tab' data-tab='processing' onclick='switchCropTab("processing")'>Processing</button>
+    <button class='crop-tab' data-tab='sales' onclick='switchCropTab("sales")'>Sales</button>
+    <button class='crop-tab' data-tab='stock' onclick='switchCropTab("stock")'>Stock Flow</button>
+</div>
+
+<div id='tab-overview' class='tab-pane active'>
+<div class='budget-header'>
+    <div class="summary-card">
+        <h3>Crop Info</h3>
+        <div class="summary-row"><span class="label">Category</span><span class="value">{{ crop.category|title }}</span></div>
+        <div class="summary-row"><span class="label">Scientific Name</span><span class="value">{{ crop.scientific_name|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Default Unit</span><span class="value">{{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Secondary Unit</span><span class="value">{{ crop.secondary_unit|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Growing Days</span><span class="value">{{ crop.growing_season_days|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Perennial</span><span class="value">{% if crop.is_perennial %}Yes{% else %}No{% endif %}</span></div>
+        <div class="summary-row"><span class="label">Lifespan</span><span class="value">{% if crop.is_perennial %}{{ crop.perennial_lifespan_years }} years{% else %}-{% endif %}</span></div>
+        <div class="summary-row"><span class="label">Harvest Frequency</span><span class="value">{{ crop.harvest_frequency|default:"-" }}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Production</h3>
+        <div class="summary-row"><span class="label">Total Seasons</span><span class="value">{{ total_seasons }}</span></div>
+        <div class="summary-row"><span class="label">Total Harvests</span><span class="value">{{ total_harvests }}</span></div>
+        <div class="summary-row"><span class="label">Quantity Harvested</span><span class="value">{{ total_harvested }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Unprocessed in Store</span><span class="value">{{ quantity_in_store }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Processed in Store</span><span class="value">{{ total_processed_in_store }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Growing Expenses</span><span class="value">{{ total_expenses|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Processing Cost</span><span class="value">{{ total_processing_cost|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Value Added</span><span class="value green">{{ total_value_added|as_currency:currency }}</span></div>
+    </div>
+
+    <div class="summary-card">
+        <h3>Sales</h3>
+        <div class="summary-row"><span class="label">Total Sales</span><span class="value">{{ total_sales }}</span></div>
+        <div class="summary-row"><span class="label">Sold Raw (unprocessed)</span><span class="value">{{ total_raw_sold }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Sold Processed</span><span class="value">{{ total_processed_sold }}</span></div>
+        <div class="summary-row"><span class="label">Total Quantity Sold</span><span class="value">{{ total_quantity_sold }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Depreciated</span><span class="value red">{{ total_depreciated }} {{ crop.default_unit }}</span></div>
+        <div class="summary-row"><span class="label">Sales Revenue</span><span class="value green">{{ total_revenue|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Net Profit</span><span class="value {% if net_profit < 0 %}red{% else %}green{% endif %}">{{ net_profit|as_currency:currency }}</span></div>
+    </div>
+</div>
+
+<div class="panel profile-card">
+    <div class="charts-grid">
+        <div class="chart-box">
+            <h3>Revenue, Cost &amp; Depreciation by Harvest
+                <a href="javascript:void(0)" onclick="toggleChartSummary()">What's in these graphs?</a>
+            </h3>
+            <div id="chartSummary" class="chart-summary"></div>
+            <div style="height:240px;">
+                <canvas id="cropLineChart"></canvas>
+            </div>
+            {{ chart_data|json_script:"crop-chart-data" }}
+        </div>
+        <div class="chart-box">
+            <h3>Quantity Distribution</h3>
+            <div style="height:240px;">
+                <canvas id="cropPieChart"></canvas>
+            </div>
+            {{ pie_data|json_script:"crop-pie-data" }}
+        </div>
+    </div>
+</div>
+</div>
+
+<div id='tab-seasons' class='tab-pane'>
+<div class='table-card'>
+    <div class="table-card-head">
+        <h3>Seasons</h3>
+        <a class='btn btn-primary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='cropseason' %}?crop={{ crop.pk }}&next={{ request.path }}" data-modal-title="New Season">+ Add Season</a>
+    </div>
+    {% if seasons %}
+    <div style="overflow-x:auto;">
+    <table class='list-table'>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Variety</th>
+                <th>Planted</th>
+                <th>Expected Harvest</th>
+                <th>Actual Harvest</th>
+                <th>Status</th>
+                <th class="num">Expenses</th>
+                <th style="text-align:right">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for season in seasons %}
+            <tr>
+                <td><a class="link" href="{% url 'crop_season_detail' season.pk %}">{{ season.field|default:"-" }}</a></td>
+                <td>{{ season.variety|default:"-" }}</td>
+                <td>{{ season.planting_date|default:"-" }}</td>
+                <td>{{ season.expected_harvest_date|default:"-" }}</td>
+                <td>{{ season.actual_harvest_date|default:"-" }}</td>
+                <td>
+                    {% if season.status == 'GROWING' %}
+                    <span class="pill-badge pill-green">{{ season.get_status_display }}</span>
+                    {% elif season.status == 'PLANNED' %}
+                    <span class="pill-badge pill-blue">{{ season.get_status_display }}</span>
+                    {% else %}
+                    <span class="pill-badge pill-slate">{{ season.get_status_display }}</span>
+                    {% endif %}
+                </td>
+                <td class="num amount">{{ season.total_expenses|as_currency:currency }}</td>
+                <td>
+                    <div class='row-actions'>
+                        <a class="action-btn view" href="{% url 'crop_season_detail' season.pk %}">View</a>
+                        <a class="action-btn" data-modal-url="{% url 'model_create' app='crops' model='harvestrecord' %}?crop={{ crop.pk }}&crop_season={{ season.pk }}&next={{ request.path }}" data-modal-title="New Harvest" href="javascript:void(0)">+ Harvest</a>
+                        <a class="action-btn" data-modal-url="{% url 'model_update' app='crops' model='cropseason' pk=season.pk %}?next={{ request.path }}" data-modal-title="Edit Season" href="javascript:void(0)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg>
+                        </a>
+                        <a class="action-btn delete" data-modal-url="{% url 'model_delete' app='crops' model='cropseason' pk=season.pk %}?next={{ request.path }}" data-modal-title="Delete Season" href="javascript:void(0)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <p>No seasons recorded</p>
+        <span>Add a season to start tracking this crop's production.</span>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-harvests' class='tab-pane'>
+<div class='panel profile-card'>
+    <div class='section-head'>
+        <h3>Harvests <span style="font-weight:400; color:var(--text-muted); font-size:0.78rem;">(what was harvested, and how each form of it was sold)</span></h3>
+        <a class='btn btn-primary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='harvestrecord' %}?crop={{ crop.pk }}&next={{ request.path }}" data-modal-title="New Harvest">+ Add Harvest</a>
+    </div>
+    {% if harvest_rows %}
+    {% for row in harvest_rows %}
+    <details class='harvest-group' {% if forloop.first %}open{% endif %}>
+        <summary>
+            <a href="{% url 'harvest_detail' row.harvest.pk %}" class='hg-title' style="text-decoration:none;color:inherit;">{{ row.harvest.crop_season }} &bull; {{ row.harvest.harvest_date }} &bull; {{ row.harvest.harvest_type|title }} &rsaquo;</a>
+            <span class='hg-meta'>
+                harvested {{ row.harvest.quantity }} {{ row.harvest.unit }}
+                &bull; raw sold {{ row.raw_sold }} {{ row.harvest.unit }}
+                &bull; raw in store {{ row.raw_remaining }} {{ row.harvest.unit }}
+                {% if row.stage_count %}&bull; processed sold {{ row.processed_sold }}{% endif %}
+            </span>
+        </summary>
+        <div class='harvest-group-body'>
+            <div class='hg-note'>
+                Each line below is a sellable form of this harvest. Stage quantities are the output of
+                processing the same harvest, so they are not additional produce.
+            </div>
+            <div style="overflow-x:auto;">
+            <table class='item-table' data-no-filter>
+                <thead>
+                    <tr>
+                        <th>Form</th>
+                        <th>Period in days</th>
+                        <th>Quantity before processing</th>
+                        <th>Processed Qty</th>
+                        <th>Depreciated</th>
+                        <th>Balance</th>
+                        <th>Sold</th>
+                        <th>Remaining</th>
+                        <th class="amount-cell">Revenue</th>
+                        <th>Sales</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for line in row.lines %}
+                    <tr>
+                        <td>
+                            {% if line.is_raw %}
+                            <span class="status-badge">Raw</span> <span class="item-name">{{ line.label }}</span>
+                            {% else %}
+                            <span class="status-badge active">Processed</span> <span class="item-name">{{ line.label }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ line.stage.duration_days|default:"-" }}</td>
+                        <td>{{ line.qty_before }} {{ line.unit }}</td>
+                        <td>{% if line.processed_qty %}{{ line.processed_qty }} {{ line.unit }}{% else %}-{% endif %}</td>
+                        <td>{% if line.depreciated %}<span style="color:var(--red)">{{ line.depreciated }} {{ line.unit }}</span>{% else %}-{% endif %}</td>
+                        <td>{% if line.balance is not None %}{{ line.balance }} {{ line.unit }}{% else %}-{% endif %}</td>
+                        <td>{{ line.sold }} {{ line.unit }}</td>
+                        <td>{% if line.remaining is not None %}{{ line.remaining }} {{ line.unit }}{% else %}-{% endif %}</td>
+                        <td class="amount-cell">{{ line.revenue|as_currency:currency }}</td>
+                        <td>{{ line.sale_count }}</td>
+                        <td>
+                            <div class='row-actions'>
+                                {% if line.is_raw %}
+                                <a class='icon' data-modal-url="{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ row.harvest.pk }}&raw=1&next={{ request.path }}" data-modal-title="Sell Raw Produce" title="Sell Raw"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></a>
+                                {% else %}
+                                <a class='icon' data-modal-url="{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ row.harvest.pk }}&processing_stage={{ line.stage.pk }}&next={{ request.path }}" data-modal-title="Sell Processed Output" title="Sell This Stage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></a>
+                                <a class='icon' data-modal-url="{% url 'model_update' app='crops' model='processingstage' pk=line.stage.pk %}?next={{ request.path }}" data-modal-title="Edit Stage" title="Edit Stage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class='totals-row'>
+                        <td>Totals</td>
+                        <td colspan="5"></td>
+                        <td>raw {{ row.raw_sold }} / processed {{ row.processed_sold }}</td>
+                        <td>{{ row.raw_remaining }} raw + {{ row.processed_in_store }} processed</td>
+                        <td class="amount-cell">{{ row.total_revenue|as_currency:currency }}</td>
+                        <td>{{ row.harvest.sales.count }}</td>
+                        <td>
+                            <div class='row-actions'>
+                                <a class='icon' data-modal-url="{% url 'model_create' app='crops' model='processingstage' %}?crop={{ crop.pk }}&harvest={{ row.harvest.pk }}&next={{ request.path }}" data-modal-title="New Processing Stage" title="Add Processing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></a>
+                                <a class='icon' data-modal-url="{% url 'model_update' app='crops' model='harvestrecord' pk=row.harvest.pk %}?next={{ request.path }}" data-modal-title="Edit Harvest" title="Edit Harvest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg></a>
+                                <a class='icon danger' data-modal-url="{% url 'model_delete' app='crops' model='harvestrecord' pk=row.harvest.pk %}?next={{ request.path }}" data-modal-title="Delete Harvest" title="Delete Harvest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></a>
+                            </div>
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+            </div>
+        </div>
+    </details>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 0 0-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg>
+        <p>No harvests recorded</p>
+        <span>Record a harvest to start tracking stock and sales.</span>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-processing' class='tab-pane'>
+<div class='panel profile-card'>
+    <div class='section-head'>
+        <h3>Processing Stages</h3>
+        <a class='btn btn-primary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='processingstage' %}?crop={{ crop.pk }}&next={{ request.path }}" data-modal-title="New Processing Stage">+ Add Stage</a>
+    </div>
+    {% if processing_groups %}
+    {% for group in processing_groups %}
+    {% for stage, balance, depreciated in group.stages_with_balances %}
+    <details class='harvest-group' {% if forloop.first %}open{% endif %}>
+        <summary>
+            <span class='hg-title'>Stage {{ stage.sequence }}. {{ stage.name }} <span style="font-weight:400;color:var(--text-muted);">&bull; {{ stage.harvest.crop_season }} &bull; {{ stage.harvest.harvest_date }}</span></span>
+            <span class='hg-meta'>
+                in {{ stage.input_quantity }} {{ stage.harvest.unit }}
+                &bull; out {% if stage.output_quantity is not None %}{{ stage.output_quantity }} {{ stage.output_unit }}{% else %}-{% endif %}
+                &bull; cost {{ stage.cost|as_currency:currency }}
+                &bull; value added {{ stage.added_value|as_currency:currency }}
+            </span>
+        </summary>
+        <div class='harvest-group-body'>
+            <div class="stage-detail-grid">
+                <div><strong>Start Date</strong>{{ stage.start_date|default:"-" }}</div>
+                <div><strong>End Date</strong>{{ stage.end_date|default:"-" }}</div>
+                <div><strong>Duration</strong>{{ stage.duration_days|default:"-" }} days</div>
+                <div><strong>Input</strong>{{ stage.input_quantity }} {{ stage.harvest.unit }}</div>
+                <div><strong>Output</strong>{% if stage.output_quantity is not None %}{{ stage.output_quantity }} {{ stage.output_unit }}{% else %}-{% endif %}</div>
+                <div><strong>Balance</strong>{% if stage.output_quantity is not None %}{{ balance }} {{ stage.output_unit }}{% else %}-{% endif %}</div>
+                <div><strong>Depreciated</strong><span style="color:var(--red)">{% if depreciated %}{{ depreciated }} {{ stage.harvest.unit }}{% else %}-{% endif %}</span></div>
+                <div><strong>Waste</strong>{{ stage.waste_quantity|default:"0" }} {{ stage.harvest.unit }} {{ stage.waste_name }}</div>
+                <div><strong>Cost</strong>{{ stage.cost|as_currency:currency }}</div>
+                <div><strong>Value Added</strong>{{ stage.added_value|as_currency:currency }}</div>
+            </div>
+            {% if stage.notes %}<div class="hg-note">{{ stage.notes }}</div>{% endif %}
+            <div class='row-actions' style="margin-top:14px;">
+                <a data-modal-url="{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&harvest={{ stage.harvest.pk }}&processing_stage={{ stage.pk }}&next={{ request.path }}" data-modal-title="Sell Output">Sell Output</a>
+                <a data-modal-url="{% url 'model_update' app='crops' model='processingstage' pk=stage.pk %}?next={{ request.path }}" data-modal-title="Edit Stage">Edit</a>
+                <a class='danger' data-modal-url="{% url 'model_delete' app='crops' model='processingstage' pk=stage.pk %}?next={{ request.path }}" data-modal-title="Delete Stage">Delete</a>
+            </div>
+        </div>
+    </details>
+    {% endfor %}
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v6M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5S12 2 12 2z"/><path d="M5.5 12a7 7 0 0 0-.5 3"/></svg>
+        <p>No processing stages</p>
+        <span>Add a processing stage to convert raw harvest into sellable products.</span>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-sales' class='tab-pane'>
+<div class='table-card'>
+    <div class="table-card-head">
+        <h3>Sales</h3>
+        <a class='btn btn-primary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='sale' %}?crop={{ crop.pk }}&next={{ request.path }}" data-modal-title="New Sale">+ Record Sale</a>
+    </div>
+    {% if sales %}
+    <div style="overflow-x:auto;">
+    <table class='list-table'>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Harvest</th>
+                <th>Form</th>
+                <th>Quantity</th>
+                <th class="num">Unit Price</th>
+                <th class="num">Total</th>
+                <th>Buyer</th>
+                <th>Payment</th>
+                <th style="text-align:right">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>{{ sale.sale_date }}</td>
+                <td>{{ sale.harvest }}</td>
+                <td>
+                    {% if sale.processing_stage %}
+                    <span class="pill-badge pill-green">Processed</span> {{ sale.processing_stage.sequence }}. {{ sale.processing_stage.name }}
+                    {% else %}
+                    <span class="pill-badge pill-slate">Raw</span>
+                    {% endif %}
+                </td>
+                <td>{{ sale.quantity }} {{ sale.unit }}</td>
+                <td class="num">{{ sale.unit_price|as_currency:currency }}</td>
+                <td class="num amount">{{ sale.total_amount|as_currency:currency }}</td>
+                <td>{{ sale.buyer|default:"-" }}</td>
+                <td>{{ sale.get_payment_method_display }}</td>
+                <td>
+                    <div class='row-actions'>
+                        <a class="action-btn" data-modal-url="{% url 'model_update' app='crops' model='sale' pk=sale.pk %}?next={{ request.path }}" data-modal-title="Edit Sale" href="javascript:void(0)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L7 20H4v-3L18.5 2.5z"/></svg>
+                            Edit
+                        </a>
+                        <a class="action-btn delete" data-modal-url="{% url 'model_delete' app='crops' model='sale' pk=sale.pk %}?next={{ request.path }}" data-modal-title="Delete Sale" href="javascript:void(0)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Delete
+                        </a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg>
+        <p>No sales yet</p>
+        <span>Record a sale to see revenue for this crop.</span>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<div id='tab-stock' class='tab-pane'>
+<div class='table-card'>
+    <div class="table-card-head">
+        <h3>Stock Flow</h3>
+    </div>
+    {% if stock_flow %}
+    <div style="padding:12px 16px 0;">
+    <div class='stock-flow-filters'>
+        <select id='stockFilterSeason' onchange='filterStockFlow()'>
+            <option value=''>All Seasons</option>
+            {% for season in stock_flow_seasons %}
+            <option value='{{ season.pk }}'>{{ season }}</option>
+            {% endfor %}
+        </select>
+        <select id='stockFilterType' onchange='filterStockFlow()'>
+            <option value=''>All Types</option>
+            {% for type in stock_flow_types %}
+            <option value='{{ type }}'>{{ type }}</option>
+            {% endfor %}
+        </select>
+        <select id='stockFilterHarvest' onchange='filterStockFlow()'>
+            <option value=''>All Harvests</option>
+            {% for harvest in stock_flow_harvests %}
+            <option value='{{ harvest.pk }}'>{{ harvest.harvest_date|default:"-" }} &bull; {{ harvest.quantity }} {{ harvest.unit }}</option>
+            {% endfor %}
+        </select>
+        <input type='text' id='stockFilterSearch' oninput='filterStockFlow()' placeholder='Search stock flow...'>
+    </div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table class='list-table' id='stockFlowTable'>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Season</th>
+                <th>Harvest</th>
+                <th>Type</th>
+                <th>Form</th>
+                <th class="num">Out</th>
+                <th class="num">In</th>
+                <th>Unit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in stock_flow %}
+            <tr data-season='{{ event.season.pk }}' data-type='{{ event.type }}' data-harvest='{{ event.harvest.pk }}'>
+                <td>{{ event.date|default:"-" }}</td>
+                <td>{{ event.season }}</td>
+                <td>{{ event.harvest }}</td>
+                <td>
+                    {% if event.type == 'Harvest' %}<span class="pill-badge pill-green">Harvest</span>
+                    {% elif event.type == 'Processing' %}<span class="pill-badge pill-blue">Processing</span>
+                    {% else %}<span class="pill-badge pill-amber">Sale</span>{% endif %}
+                </td>
+                <td>{{ event.form_label }}</td>
+                <td class="num">{% if event.out_qty is not None %}{{ event.out_qty }}{% else %}-{% endif %}</td>
+                <td class="num">{% if event.in_qty is not None %}{{ event.in_qty }}{% else %}-{% endif %}</td>
+                <td>{{ event.unit }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>
+        <p>No stock movement</p>
+        <span>Harvests, processing and sales will appear here.</span>
+    </div>
+    {% endif %}
+</div>
+</div>
+
+<script>
+function switchCropTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.crop-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('[data-tab=' + tabName + ']').classList.add('active');
+}
+
+function filterStockFlow() {
+    var season = document.getElementById('stockFilterSeason').value;
+    var type = document.getElementById('stockFilterType').value;
+    var harvest = document.getElementById('stockFilterHarvest').value;
+    var term = document.getElementById('stockFilterSearch').value.toLowerCase();
+    document.querySelectorAll('#stockFlowTable tbody tr').forEach(function(row) {
+        var match = true;
+        if (season && row.getAttribute('data-season') !== season) match = false;
+        if (type && row.getAttribute('data-type') !== type) match = false;
+        if (harvest && row.getAttribute('data-harvest') !== harvest) match = false;
+        if (term && row.textContent.toLowerCase().indexOf(term) === -1) match = false;
+        row.style.display = match ? '' : 'none';
+    });
+}
+
+var currencyRate = Number('{{ currency.rate }}');
+var currencySymbol = '{{ currency.symbol|escapejs }}';
+var cropChartData = JSON.parse(document.getElementById('crop-chart-data').textContent);
+var cropCosts = cropChartData.costs.map(function(v) { return Number(v) * currencyRate; });
+var cropRevenues = cropChartData.revenues.map(function(v) { return Number(v) * currencyRate; });
+var cropDepreciated = cropChartData.depreciated.map(function(v) { return Number(v); });
+new Chart(document.getElementById('cropLineChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+        labels: cropChartData.labels,
+        datasets: [
+            {
+                label: 'Sales Revenue',
+                data: cropRevenues,
+                backgroundColor: 'rgba(34, 197, 94, 0.85)',
+                hoverBackgroundColor: '#16a34a',
+                borderRadius: 5,
+                borderSkipped: false,
+                maxBarThickness: 34,
+                yAxisID: 'y',
+                order: 2
+            },
+            {
+                label: 'Processing Cost',
+                data: cropCosts,
+                backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                hoverBackgroundColor: '#dc2626',
+                borderRadius: 5,
+                borderSkipped: false,
+                maxBarThickness: 34,
+                yAxisID: 'y',
+                order: 3
+            },
+            {
+                type: 'line',
+                label: 'Depreciated (' + '{{ crop.default_unit|escapejs }}' + ')',
+                data: cropDepreciated,
+                borderColor: '#f59e0b',
+                backgroundColor: '#f59e0b',
+                borderWidth: 2,
+                borderDash: [5, 4],
+                pointRadius: 4,
+                pointStyle: 'rectRot',
+                pointHoverRadius: 6,
+                tension: 0.35,
+                spanGaps: true,
+                fill: false,
+                yAxisID: 'y1',
+                order: 1
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: {
+                position: 'top',
+                align: 'start',
+                labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 9, boxHeight: 9, padding: 14, font: { size: 11 } }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                padding: 10,
+                cornerRadius: 8,
+                titleFont: { size: 12, weight: '600' },
+                bodyFont: { size: 11 },
+                callbacks: {
+                    label: function(item) {
+                        var v = item.parsed.y;
+                        if (item.dataset.yAxisID === 'y1') {
+                            return ' ' + item.dataset.label + ': ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' {{ crop.default_unit|escapejs }}';
+                        }
+                        return ' ' + item.dataset.label + ': ' + currencySymbol + ' ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                grid: { display: false },
+                ticks: { font: { size: 10 }, color: '#64748b' },
+                title: { display: true, text: 'Harvest date', font: { size: 10 }, color: '#94a3b8' }
+            },
+            y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                beginAtZero: true,
+                title: { display: true, text: currencySymbol, font: { size: 10 }, color: '#94a3b8' },
+                grid: { color: '#f1f5f9' },
+                ticks: {
+                    font: { size: 10 },
+                    color: '#64748b',
+                    callback: function(v) { return currencySymbol + ' ' + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+                }
+            },
+            y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                beginAtZero: true,
+                title: { display: true, text: '{{ crop.default_unit|escapejs }}', font: { size: 10 }, color: '#94a3b8' },
+                grid: { drawOnChartArea: false },
+                ticks: { font: { size: 10 }, color: '#64748b' }
+            }
+        }
+    }
+});
+
+var cropPieData = JSON.parse(document.getElementById('crop-pie-data').textContent);
+var cropPieValues = cropPieData.values.map(function(v) { return Number(v); });
+new Chart(document.getElementById('cropPieChart').getContext('2d'), {
+    type: 'pie',
+    data: {
+        labels: cropPieData.labels,
+        datasets: [{
+            data: cropPieValues,
+            backgroundColor: ['#4a7c2e', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f97316'],
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+        }
+    }
+});
+
+function sumArr(arr) { return arr.reduce(function(a, b) { return a + b; }, 0); }
+function fmtMoney(v) { return currencySymbol + ' ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+function fmtQty(v) { return v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' {{ crop.default_unit|escapejs }}'; }
+
+function toggleChartSummary() {
+    var box = document.getElementById('chartSummary');
+    if (box.style.display === 'none' || !box.style.display) {
+        var pieTotal = sumArr(cropPieValues);
+        var pieLines = cropPieData.labels.map(function(label, i) {
+            var v = cropPieValues[i];
+            var pct = pieTotal ? (v / pieTotal * 100).toFixed(1) : '0.0';
+            return '<li><strong>' + label + ':</strong> ' + fmtQty(v) + ' (' + pct + '%)</li>';
+        }).join('');
+        box.innerHTML =
+            '<strong>Bar chart</strong> &mdash; one group of bars per harvest (' + cropChartData.labels.length + ' harvest(s)).' +
+            '<ul style="margin:6px 0 8px 16px;">' +
+            '<li><strong>Sales Revenue</strong> (green bars, left axis, ' + currencySymbol + '): total ' + fmtMoney(sumArr(cropRevenues)) + '</li>' +
+            '<li><strong>Processing Cost</strong> (red bars, left axis, ' + currencySymbol + '): total ' + fmtMoney(sumArr(cropCosts)) + '</li>' +
+            '<li><strong>Depreciated</strong> (amber dashed line, right axis, quantity): total ' + fmtQty(sumArr(cropDepreciated)) + '</li>' +
+            '</ul>' +
+            '<strong>Pie chart</strong> &mdash; how the total quantity of ' + fmtQty(pieTotal) + ' is distributed:' +
+            '<ul style="margin:6px 0 0 16px;">' + pieLines + '</ul>';
+        box.style.display = 'block';
+    } else {
+        box.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}

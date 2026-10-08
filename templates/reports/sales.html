@@ -1,0 +1,266 @@
+{% extends report_base_template|default:'dashboard/base.html' %}
+{% load currency_tags %}
+
+{% block title %}Sales Report - FarmLedger Pro{% endblock %}
+{% block nav_report_sales %}active{% endblock %}
+{% block breadcrumbs %}Reports / Sales{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "reports/report_styles.html" %}
+<style>
+    .sales-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 14px; padding: 2px 4px; font-size: 0.82rem; color: var(--text-muted); }
+    .sales-stats b { color: var(--primary-dark); font-variant-numeric: tabular-nums; }
+    .sales-stats .sep { color: var(--border); }
+    .sales-section-title { margin: 18px 0 10px; font-size: 0.86rem; font-weight: 700; color: var(--primary-dark); text-transform: uppercase; letter-spacing: 0.05em; }
+    .sales-table-wrap { overflow-x: auto; }
+    .sales-table-wrap .season-table { min-width: 680px; }
+    .sales-share { display: flex; align-items: center; gap: 8px; min-width: 125px; }
+    .sales-share .hbar { flex: 1; }
+    .sales-share .num { min-width: 40px; font-size: 0.72rem; }
+    .sales-trends { margin-bottom: 16px; }
+    .sales-line-frame { padding: 12px 14px 8px; overflow-x: auto; }
+    .sales-line { display: block; width: 100%; max-width: 1000px; min-width: 320px; height: auto; margin: 0 auto; }
+    .sales-line .line-grid { stroke: #e2e8f0; stroke-width: 1; stroke-dasharray: 4 4; }
+    .sales-line .line-path { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+    .sales-line .line-path.revenue, .sales-line .line-point.revenue { stroke: #1b4332; }
+    .sales-line .line-path.quantity, .sales-line .line-point.quantity { stroke: #40916c; }
+    .sales-line .line-path.quantity { stroke-dasharray: 7 5; }
+    .sales-line .line-point { fill: #fff; stroke-width: 1.5; }
+    .sales-line .line-point:hover { fill: #d1fae5; }
+    .sales-line text { fill: var(--text-muted); font-size: 10px; }
+    .sales-line-key { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px 26px; padding: 0 14px 14px; font-size: 0.74rem; color: var(--text-muted); }
+    .sales-line-key span { display: inline-flex; align-items: center; gap: 6px; }
+    .sales-line-key .lg-dot { margin: 0; }
+    .pie-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+    .pie-grid .table-card { min-width: 0; margin-bottom: 0; }
+    @media (max-width: 900px) { .pie-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "reports/section_header.html" with title="Sales Report" subtitle="Track produce revenue by crop season, customer and payment method." eyebrow="Sales report" %}
+
+{% include "reports/period_filter.html" %}
+
+<!-- Inline summary -->
+<div class="sales-stats">
+    <span>Gross produce revenue <b>{{ gross|as_currency_compact:currency }}</b></span><span class="sep">|</span>
+    <span><b>{{ order_count }}</b> orders</span><span class="sep">|</span>
+    <span>Avg order <b>{{ avg_order|as_currency_compact:currency }}</b></span><span class="sep">|</span>
+    <span><b>{{ qty_sold|compact }} kg</b> sold</span><span class="sep">|</span>
+    <span>Waste sales <b>{{ waste_revenue|as_currency_compact:currency }}</b> ({{ waste_qty|compact }} kg)</span><span class="sep">|</span>
+    <span>Receivables <b>{{ receivables|as_currency_compact:currency }}</b> ({{ receivable_count }} unpaid)</span>
+</div>
+
+<!-- Line graph -->
+<div class="sales-section-title">Sales over time</div>
+<div class="table-card sales-trends">
+    <div class="table-card-head"><h3>Monthly Sales Revenue &amp; Quantity</h3><span class="row-count">Jan–Dec {{ chart_year }} &middot; 12 months</span></div>
+    {% if monthly_rows %}
+    <div class="sales-line-frame">
+        <svg class="sales-line sales-line-combined" viewBox="0 0 600 220" role="img" aria-label="Monthly sales revenue and quantity sold line graph; revenue uses the left currency axis and quantity uses the right kg axis">
+            <line class="line-grid" x1="40" y1="43" x2="560" y2="43"/>
+            <line class="line-grid" x1="40" y1="88" x2="560" y2="88"/>
+            <line class="line-grid" x1="40" y1="133" x2="560" y2="133"/>
+            <line class="line-grid" x1="40" y1="178" x2="560" y2="178"/>
+            <text x="6" y="36">{{ revenue_line.max|as_currency_compact:currency }}</text>
+            <text x="594" y="36" text-anchor="end">{{ quantity_line.max|compact }} kg</text>
+            <text x="16" y="182">0</text>
+            <text x="584" y="182" text-anchor="end">0</text>
+            <polyline class="line-path revenue" points="{{ revenue_line.points }}"/>
+            <polyline class="line-path quantity" points="{{ quantity_line.points }}"/>
+            {% for m in monthly_rows %}
+            <circle class="line-point revenue" cx="{{ m.x }}" cy="{{ m.y }}" r="4"><title>{{ m.label }} revenue: {{ m.value|as_currency:currency }}</title></circle>
+            {% if m.show_label %}<text x="{{ m.x }}" y="208" text-anchor="middle">{{ m.label }}</text>{% endif %}
+            {% endfor %}
+            {% for m in monthly_qty_rows %}
+            <circle class="line-point quantity" cx="{{ m.x }}" cy="{{ m.y }}" r="2.5"><title>{{ m.label }} quantity: {{ m.value }} kg</title></circle>
+            {% endfor %}
+        </svg>
+    </div>
+    <div class="sales-line-key">
+        <span><i class="lg-dot" data-bg="#1b4332"></i>Monthly Sales Revenue ({{ currency.code }}) &middot; left axis</span>
+        <span><i class="lg-dot" data-bg="#40916c"></i>Monthly Quantity Sold (kg) &middot; right axis</span>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No sales</p><span>No produce sales recorded for this period.</span></div>
+    {% endif %}
+</div>
+
+<!-- Bar charts -->
+<div class="sales-section-title">Season and crop performance</div>
+<div class="report-grid">
+    <div class="table-card">
+        <div class="table-card-head"><h3>Season Revenue</h3><span class="row-count">Top {{ season_chart|length }}</span></div>
+        {% if season_chart %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for row in season_chart %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ row.bar }}" title="{{ row.season }} &middot; {{ row.crop }}: {{ row.total|as_currency:currency }} ({{ row.share }}%)"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for row in season_chart %}
+                <span>{{ row.crop }}<i class="xs">{{ row.season }}</i><b class="xv">{{ row.total|as_currency_compact:currency }}</b></span>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No season sales</p><span>Season revenue chart will appear here.</span></div>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Revenue by Crop</h3>
+            <a class="link" href="{% url 'model_list' app='crops' model='sale' %}">All sales &rarr;</a>
+        </div>
+        {% if top_crops %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for row in top_crops %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ row.bar }}" title="{{ row.label }}: {{ row.total|as_currency:currency }} &middot; {{ row.n }} orders &middot; {{ row.qty }} kg"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for row in top_crops %}
+                <span>{{ row.label }}<i class="xs">{{ row.share }}% &middot; {{ row.qty }} kg</i><b class="xv">{{ row.total|as_currency_compact:currency }}</b></span>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No sales</p><span>Crop revenue will appear here.</span></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="report-grid">
+    <div class="table-card">
+        <div class="table-card-head"><h3>Top Customers</h3><span class="row-count">Top {{ top_buyers|length }}</span></div>
+        {% if top_buyers %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for row in top_buyers %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ row.bar }}" title="{{ row.label }}: {{ row.total|as_currency:currency }} &middot; {{ row.n }} orders &middot; {{ row.qty }} kg"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for row in top_buyers %}
+                <span>{{ row.label }}<i class="xs">{{ row.share }}% &middot; {{ row.n }} orders</i><b class="xv">{{ row.total|as_currency_compact:currency }}</b></span>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No buyers</p><span>Customer rankings will appear here.</span></div>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-card-head"><h3>Monthly Quantity Sold</h3><span class="row-count">{{ chart_year }} &middot; kg</span></div>
+        {% if monthly_qty_rows %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for row in monthly_qty_rows %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ row.pct }}" title="{{ row.label }}: {{ row.value }} kg"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for row in monthly_qty_rows %}
+                <span>{{ row.label|slice:':3' }}<b class="xv">{{ row.value|compact }}</b></span>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No sales</p><span>Quantity chart will appear here.</span></div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Pie charts -->
+<div class="sales-section-title">Sales composition</div>
+<div class="pie-grid">
+    <div class="table-card">
+        <div class="table-card-head"><h3>Crop Revenue Share</h3><span class="row-count">{{ crop_donut|length }} groups</span></div>
+        {% if crop_donut %}
+        {% include "reports/donut.html" with segments=crop_donut center_num=gross|as_currency_compact:currency center_lbl="Crop Sales" %}
+        {% else %}
+        <div class="empty-state"><p>No crop sales</p><span>Crop revenue share will appear here.</span></div>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-card-head"><h3>Payment Methods</h3><span class="row-count">{{ pay_donut|length }} methods</span></div>
+        {% if pay_donut %}
+        {% include "reports/donut.html" with segments=pay_donut center_num=gross|as_currency_compact:currency center_lbl="Gross Sales" %}
+        {% else %}
+        <div class="empty-state"><p>No payments</p><span>Payment breakdown will appear here.</span></div>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-card-head"><h3>Sales Mix</h3><span class="row-count">Produce vs waste</span></div>
+        {% if mix_donut %}
+        {% include "reports/donut.html" with segments=mix_donut center_num=sales_mix.total|as_currency_compact:currency center_lbl="Total Sales" %}
+        {% else %}
+        <div class="empty-state"><p>No sales</p><span>Sales mix will appear here.</span></div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Detail tables -->
+<div class="sales-section-title">Sales detail</div>
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Sales by Season and Crop</h3>
+        <span class="row-count">{{ season_rows|length }} seasons</span>
+    </div>
+    {% if season_rows %}
+    <div class="sales-table-wrap">
+        <table class="list-table season-table" data-no-filter>
+            <thead><tr><th>Season</th><th>Crop</th><th class="num">Orders</th><th class="num">Quantity</th><th class="num">Revenue</th><th>Share of Sales</th></tr></thead>
+            <tbody>
+                {% for row in season_rows %}
+                <tr>
+                    <td style="font-weight:600;">{{ row.season }}</td>
+                    <td>{{ row.crop }}</td>
+                    <td class="num">{{ row.n }}</td>
+                    <td class="num">{{ row.qty }} kg</td>
+                    <td class="num amount">{{ row.total|as_currency:currency }}</td>
+                    <td><div class="sales-share"><div class="hbar crop"><span data-width="{{ row.share }}"></span></div><span class="num">{{ row.share }}%</span></div></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No season sales</p><span>No produce sales match the selected crop, season and dates.</span></div>
+    {% endif %}
+</div>
+
+<div class="table-card">
+    <div class="table-card-head"><h3>Monthly Detail</h3><span class="row-count">{{ monthly_rows|length }} months</span></div>
+    {% if monthly_rows %}
+    <div class="sales-table-wrap">
+        <table class="list-table" data-no-filter>
+            <thead><tr><th>Month</th><th class="num">Produce Revenue</th><th class="num">Quantity Sold</th></tr></thead>
+            <tbody>{% for row in monthly_rows %}<tr><td>{{ row.label }}</td><td class="num amount">{{ row.value|as_currency:currency }}</td><td class="num">{{ row.qty }} kg</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No activity</p><span>Monthly breakdown will appear here.</span></div>
+    {% endif %}
+</div>
+{% endblock %}

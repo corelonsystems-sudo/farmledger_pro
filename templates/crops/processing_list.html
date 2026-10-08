@@ -1,0 +1,202 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Processing - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Crops &rsaquo; Processing{% endblock %}
+{% block nav_processing %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .stage-badge {
+        display: inline-block; padding: 3px 9px;
+        border-radius: 12px; font-size: 0.65rem; font-weight: 700;
+        background: #dbeafe; color: #1e40af;
+        text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .qty-flow { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .qty-flow .arrow { color: var(--text-muted); margin: 0 4px; }
+    .loss { color: var(--red); font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Processing Stages</h2>
+        <p>Track processing steps, input/output quantities, costs, and value added.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Processing Stage">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Stage
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82.33l.06.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.6.63 1.05 1.24 1.11"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Total Stages</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_cost|as_currency:currency }}</div>
+            <div class="kpi-label">Processing Cost</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_added|as_currency:currency }}</div>
+            <div class="kpi-label">Value Added</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M9 13l6-6"/><path d="M15 13l-6-6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_waste }} kg</div>
+            <div class="kpi-label">Waste</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.crop or filters.harvest or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.crop or filters.harvest or q %}
+        <span class="active-count">Active</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Stage name, crop...">
+        </div>
+        <div class="form-group">
+            <label for="crop">Crop</label>
+            <select name="crop" id="crop">
+                <option value="">All Crops</option>
+                {% for c in crops %}
+                <option value="{{ c.pk }}" {% if filters.crop|stringformat:"s" == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="harvest">Harvest</label>
+            <select name="harvest" id="harvest">
+                <option value="">All Harvests</option>
+                {% for h in harvests %}
+                <option value="{{ h.pk }}" {% if filters.harvest|stringformat:"s" == h.pk|stringformat:"s" %}selected{% endif %}>{{ h }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Processing Records</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} stage{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if stages %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Stage</th>
+                    <th>Harvest</th>
+                    <th>Start</th>
+                    <th class="num">Input</th>
+                    <th class="num">Output</th>
+                    <th class="num">Loss</th>
+                    <th class="num">Waste</th>
+                    <th class="num">Cost</th>
+                    <th class="num">Value Added</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in stages %}
+                <tr>
+                    <td>
+                        <span class="stage-badge">{{ s.sequence }}. {{ s.name }}</span>
+                    </td>
+                    <td>
+                        <a class="link" href="{% url 'harvest_detail' s.harvest.pk %}">{{ s.harvest.crop_season.crop.name }}</a>
+                        <div class="sub-text">{{ s.harvest.harvest_date }}</div>
+                    </td>
+                    <td style="white-space:nowrap;">{{ s.start_date|default:"-" }}</td>
+                    <td class="num qty-flow">{{ s.input_quantity }} {{ s.harvest.unit }}</td>
+                    <td class="num qty-flow">
+                        {% if s.output_quantity is not None %}{{ s.output_quantity }} {{ s.output_unit|default:s.harvest.unit }}{% else %}-{% endif %}
+                    </td>
+                    <td class="num qty-flow">
+                        {% if s.input_quantity and s.output_quantity %}<span class="loss">{{ s.input_quantity|sub:s.output_quantity }} {{ s.harvest.unit }}</span>{% else %}-{% endif %}
+                    </td>
+                    <td class="num qty-flow">{{ s.waste_quantity }} {{ s.harvest.unit }}</td>
+                    <td class="num amount">{{ s.cost|as_currency:currency }}</td>
+                    <td class="num" style="color:var(--primary); font-weight:600;">{{ s.added_value|as_currency:currency }}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=s.pk %}" data-modal-title="Edit Stage" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=s.pk %}" data-modal-title="Delete Stage" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82.33l.06.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.6.63 1.05 1.24 1.11"/></svg>
+        <p>No processing stages found</p>
+        <span>Try adjusting your filters, or add a new stage.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

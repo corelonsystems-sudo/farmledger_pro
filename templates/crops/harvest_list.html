@@ -1,0 +1,230 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Harvests - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Crops &rsaquo; Harvests{% endblock %}
+{% block nav_harvests %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .harvest-type {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 9px; border-radius: 12px;
+        font-size: 0.65rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.03em;
+        white-space: nowrap;
+    }
+    .harvest-type::before {
+        content: '';
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+    .type-main      { background: #d1fae5; color: #065f46; }
+    .type-secondary { background: #dbeafe; color: #1e40af; }
+    .type-thinning  { background: #fef3c7; color: #92400e; }
+    .type-gleaning  { background: #f3e8ff; color: #6b21a8; }
+    .quality-tag {
+        display: inline-block; padding: 2px 7px;
+        border-radius: 4px; font-size: 0.65rem; font-weight: 700;
+        background: #f0fdf4; color: var(--primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Harvests</h2>
+        <p>Track harvest records, quantities, and yields across all seasons.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Harvest">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Harvest
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/><path d="M7 12h4l-2 4h4l-2 4"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_qty }} kg</div>
+            <div class="kpi-label">Total Harvested</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Records</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_revenue|as_currency:currency }}</div>
+            <div class="kpi-label">Revenue</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M9 13l6-6"/><path d="M15 13l-6-6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.waste_qty }} kg</div>
+            <div class="kpi-label">Waste</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.crop or filters.field or filters.harvest_type or filters.date_from or filters.date_to or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.crop or filters.field or filters.harvest_type or filters.date_from or filters.date_to or q %}
+        <span class="active-count">Active</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Crop name, notes...">
+        </div>
+        <div class="form-group">
+            <label for="crop">Crop</label>
+            <select name="crop" id="crop">
+                <option value="">All Crops</option>
+                {% for c in crops %}
+                <option value="{{ c.pk }}" {% if filters.crop|stringformat:"s" == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="field">Field</label>
+            <select name="field" id="field">
+                <option value="">All Fields</option>
+                {% for f in fields %}
+                <option value="{{ f.pk }}" {% if filters.field|stringformat:"s" == f.pk|stringformat:"s" %}selected{% endif %}>{{ f }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="harvest_type">Type</label>
+            <select name="harvest_type" id="harvest_type">
+                <option value="">All Types</option>
+                {% for value, label in harvest_types %}
+                <option value="{{ value }}" {% if filters.harvest_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="date_from">From</label>
+            <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+        </div>
+        <div class="form-group">
+            <label for="date_to">To</label>
+            <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Harvest Records</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} harvest{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if harvests %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Crop / Season</th>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th class="num">Quantity</th>
+                    <th class="num">Sold</th>
+                    <th class="num">Remaining</th>
+                    <th>Quality</th>
+                    <th class="num">Waste</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in harvests %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ h.harvest_date }}</td>
+                    <td>
+                        <a class="link" href="{% url 'harvest_detail' h.pk %}">{{ h.crop_season.crop.name }}</a>
+                        <div class="sub-text">{{ h.crop_season }}</div>
+                    </td>
+                    <td>{{ h.crop_season.field }}</td>
+                    <td><span class="harvest-type type-{{ h.harvest_type|lower }}">{{ h.get_harvest_type_display }}</span></td>
+                    <td class="num amount">{{ h.quantity }} {{ h.unit }}</td>
+                    <td class="num">{{ h.quantity_sold }} {{ h.unit }}</td>
+                    <td class="num">{{ h.quantity_unsold }} {{ h.unit }}</td>
+                    <td>{% if h.quality_grade %}<span class="quality-tag">{{ h.quality_grade }}</span>{% else %}-{% endif %}</td>
+                    <td class="num">{{ h.waste_quantity }} {{ h.unit }}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn view" href="{% url 'harvest_detail' h.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=h.pk %}" data-modal-title="Edit Harvest" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=h.pk %}" data-modal-title="Delete Harvest" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/><path d="M7 12h4l-2 4h4l-2 4"/></svg>
+        <p>No harvests found</p>
+        <span>Try adjusting your filters, or record a new harvest.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

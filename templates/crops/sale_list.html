@@ -1,0 +1,236 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ model_name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}{% if is_waste %}Crops &rsaquo; Waste{% else %}Crops &rsaquo; Sales{% endif %}{% endblock %}
+{% block nav_sales %}{% if not is_waste %}active{% endif %}{% endblock %}
+{% block nav_waste %}{% if is_waste %}active{% endif %}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .waste-tag {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 9px;
+        border-radius: 12px;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+        background: #fef3c7; color: #92400e;
+    }
+    .waste-tag::before {
+        content: '';
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+    .waste-amount { font-weight: 700; color: #92400e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>{{ model_name }}</h2>
+        <p>{% if is_waste %}Track and manage waste sale records from processing byproducts.{% else %}Track and manage all crop sales across your farm operations.{% endif %}</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}{% if is_waste %}?waste=1{% endif %}" data-modal-title="{{ create_label }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            {{ create_label }}
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_amount|as_currency:currency }}</div>
+            <div class="kpi-label">{% if is_waste %}Waste Revenue{% else %}Total Revenue{% endif %}</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">{% if is_waste %}Waste Sales{% else %}Total Sales{% endif %}</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon {% if is_waste %}amber{% else %}blue{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_qty }} kg</div>
+            <div class="kpi-label">{% if is_waste %}Waste Quantity{% else %}Quantity Sold{% endif %}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.date_from or filters.date_to or filters.buyer or filters.payment_method or filters.payment_status or filters.crop or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.date_from or filters.date_to or filters.buyer or filters.payment_method or filters.crop or q %}
+        <span class="active-count">Active</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get" id="saleFilters">
+        {% if is_waste %}<input type="hidden" name="waste" value="1">{% endif %}
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Buyer or notes...">
+        </div>
+        <div class="form-group">
+            <label for="date_from">Date From</label>
+            <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+        </div>
+        <div class="form-group">
+            <label for="date_to">Date To</label>
+            <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+        </div>
+        <div class="form-group">
+            <label for="buyer">Buyer</label>
+            <input type="text" name="buyer" id="buyer" value="{{ filters.buyer }}" placeholder="Buyer...">
+        </div>
+        <div class="form-group">
+            <label for="payment_method">Payment Method</label>
+            <select name="payment_method" id="payment_method">
+                <option value="">All Methods</option>
+                {% for value, label in payment_methods %}
+                <option value="{{ value }}" {% if filters.payment_method == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="payment_status">Payment Status</label>
+            <select name="payment_status" id="payment_status">
+                <option value="">All Statuses</option>
+                {% for value, label in payment_statuses %}
+                <option value="{{ value }}" {% if filters.payment_status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="crop">Crop</label>
+            <select name="crop" id="crop">
+                <option value="">All Crops</option>
+                {% for c in crops %}
+                <option value="{{ c.pk }}" {% if filters.crop|stringformat:"s" == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="{% if is_waste %}?waste=1{% else %}?{% endif %}" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>{% if is_waste %}Waste Sales Records{% else %}Sales Records{% endif %}</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} record{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if sales %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Crop</th>
+                    <th>Buyer</th>
+                    {% if is_waste %}<th>Waste Source</th>{% endif %}
+                    <th>{% if is_waste %}Qty Sold{% else %}Quantity{% endif %}</th>
+                    <th>Unit</th>
+                    {% if is_waste %}
+                    <th class="num">Balance</th>
+                    <th class="num">Waste Stock</th>
+                    {% else %}
+                    <th class="num">Unit Price</th>
+                    <th class="num">Total</th>
+                    {% endif %}
+                    <th>Payment</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in sales %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ sale.sale_date }}</td>
+                    <td>{% if sale.harvest %}{{ sale.harvest.crop_season.crop.name }}{% elif sale.inventory_item %}{{ sale.inventory_item.name }}{% else %}-{% endif %}</td>
+                    <td>{{ sale.buyer|default:"-" }}{% if sale.payment_status != 'PAID' %} <span class="waste-tag">{{ sale.get_payment_status_display }}</span>{% endif %}</td>
+                    {% if is_waste %}
+                    <td><span class="waste-tag">{{ sale.processing_stage.waste_name|default:sale.harvest.waste_name|default:"-" }}</span></td>
+                    {% endif %}
+                    <td>{{ sale.quantity }}</td>
+                    <td>{{ sale.unit }}</td>
+                    {% if is_waste %}
+                    <td class="num">{{ sale.waste_balance|default:"0" }} {{ sale.unit }}</td>
+                    <td class="num">{% if sale.processing_stage %}{{ sale.processing_stage.waste_quantity|default:"0" }}{% else %}{{ sale.harvest.waste_quantity|default:"0" }}{% endif %} {{ sale.unit }}</td>
+                    {% else %}
+                    <td class="num">{{ sale.unit_price|as_currency:currency }}</td>
+                    <td class="num amount">{{ sale.total_amount|as_currency:currency }}</td>
+                    {% endif %}
+                    <td style="white-space:nowrap;">{{ sale.get_payment_method_display }}</td>
+                    <td>
+                        <div class="row-actions">
+                            {% if is_waste %}<a class="action-btn view" href="{% url 'waste_detail' pk=sale.pk %}">{% else %}<a class="action-btn view" data-modal-url="{% url 'sale_detail' pk=sale.pk %}" data-modal-title="{{ view_label }}" href="javascript:void(0)">{% endif %}
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            {% if is_waste %}
+                            <a class="action-btn" data-modal-url="{{ sale.waste_edit_url }}" data-modal-title="Edit Stock" href="javascript:void(0)">
+                            {% else %}
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=sale.pk %}" data-modal-title="Edit Sale" href="javascript:void(0)">
+                            {% endif %}
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=sale.pk %}" data-modal-title="Delete Sale" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        <p>No {% if is_waste %}waste sales{% else %}sales{% endif %} found</p>
+        <span>Try adjusting your filters, or record a new sale.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

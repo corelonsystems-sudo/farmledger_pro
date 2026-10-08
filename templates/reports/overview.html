@@ -1,0 +1,290 @@
+{% extends report_base_template|default:'dashboard/base.html' %}
+{% load currency_tags %}
+
+{% block title %}Reports - FarmLedger Pro{% endblock %}
+{% block nav_reports %}active{% endblock %}
+{% block breadcrumbs %}Reports / Overview{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "reports/report_styles.html" %}
+{% endblock %}
+
+{% block content %}
+{% include "reports/section_header.html" with title="Farm Report" subtitle="Financial and operational performance overview." eyebrow="Overview report" %}
+
+{% include "reports/period_filter.html" %}
+
+<div class="hero-strip">
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+        <div>
+            <div class="h-value">{{ total_income|as_currency_compact:currency }}</div>
+            <div class="h-label">Total Income</div>
+            <div class="h-sub">{{ income_count }} records</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg></div>
+        <div>
+            <div class="h-value">{{ total_expenses|as_currency_compact:currency }}</div>
+            <div class="h-label">Total Expenses</div>
+            <div class="h-sub">{{ expense_count }} records</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div>
+            <div class="h-value {% if net_profit < 0 %}loss{% endif %}">{{ net_profit|as_currency_compact:currency }}</div>
+            <div class="h-label">Net Profit / Loss</div>
+            <div class="h-sub">{{ summary.profitable_months }} of {{ summary.months }} months profitable</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div>
+            <div class="h-value">{{ sales_revenue|as_currency_compact:currency }}</div>
+            <div class="h-label">Crop Sales Revenue</div>
+            <div class="h-sub">{{ sale_count }} sales</div>
+        </div>
+    </div>
+</div>
+
+<!-- Operational snapshot -->
+<div class="ops-row">
+    <div class="ops-chip">
+        <div class="o-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 00-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg></div>
+        <div><div class="o-value">{{ ops.harvested }} kg</div><div class="o-label">Harvested</div></div>
+    </div>
+    <div class="ops-chip">
+        <div class="o-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg></div>
+        <div><div class="o-value">{{ ops.growing_seasons }}</div><div class="o-label">Growing Seasons</div></div>
+    </div>
+    <div class="ops-chip">
+        <div class="o-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
+        <div><div class="o-value">{{ ops.fields }}</div><div class="o-label">Active Fields</div></div>
+    </div>
+    <div class="ops-chip">
+        <div class="o-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg></div>
+        <div><div class="o-value">{{ ops.equipment }}</div><div class="o-label">Equipment</div></div>
+    </div>
+    <div class="ops-chip">
+        <div class="o-icon" style="background:#fef3c7; color:#92400e;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div>
+        <div><div class="o-value">{{ ops.open_tasks }}</div><div class="o-label">Open Tasks</div></div>
+    </div>
+</div>
+
+<!-- Financial position strip: share of income spent vs kept -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Financial Position</h3>
+        <span class="row-count">income vs spend</span>
+    </div>
+    <div class="pipeline-wrap">
+        <div class="pipeline">
+            {% if fin.exp_pct %}<span class="pseg exp" data-width="{{ fin.exp_pct }}" title="Expenses: {{ fin.exp_pct }}% of income"></span>{% endif %}
+            {% if fin.net_pct > 0 %}<span class="pseg net" data-width="{{ fin.net_pct }}" title="Net margin: {{ fin.net_pct }}%"></span>{% endif %}
+        </div>
+        <div class="pipeline-legend">
+            <span class="pstep"><span class="lg-dot" data-bg="#e07a5f"></span>Expenses <b>{{ total_expenses|as_currency_compact:currency }}</b><span class="muted">{{ fin.exp_pct }}%</span></span>
+            <span class="pstep"><span class="lg-dot" data-bg="#1b4332"></span>Net {% if net_profit < 0 %}loss{% else %}margin{% endif %} <b>{{ net_profit|as_currency_compact:currency }}</b><span class="muted">{{ fin.net_pct }}%</span></span>
+            <span class="pstep" style="margin-left:auto;"><span class="muted">Total income</span> <b>{{ total_income|as_currency_compact:currency }}</b></span>
+        </div>
+    </div>
+</div>
+
+<div class="report-grid">
+    <!-- Monthly income vs expense chart -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Monthly Cash Flow</h3>
+            <div class="avg-chips">
+                <span class="avg-chip">Avg income {{ summary.avg_income|as_currency_compact:currency }}/mo</span>
+                <span class="avg-chip">Avg expense {{ summary.avg_expense|as_currency_compact:currency }}/mo</span>
+            </div>
+        </div>
+        {% if monthly_rows %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for m in monthly_rows %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar in" data-height="{{ m.income_pct }}" title="{{ m.label }} income: {{ m.income|as_currency:currency }}"></span>
+                        <span class="bar out" data-height="{{ m.expense_pct }}" title="{{ m.label }} expense: {{ m.expense|as_currency:currency }}"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for m in monthly_rows %}<span>{{ m.label }}</span>{% endfor %}
+            </div>
+            <div class="chart-legend">
+                <span><span class="dot in"></span>Income</span>
+                <span><span class="dot out"></span>Expenses</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <p>No activity</p>
+            <span>No income or expenses recorded for this period.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Expense structure donut -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Expense Structure</h3>
+            <span class="row-count">{{ expense_by_category|length }} budget codes</span>
+        </div>
+        {% if donut_rows %}
+        {% include "reports/donut.html" with segments=donut_rows center_num=total_expenses|as_currency_compact:currency center_lbl="Total Spend" %}
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 4"/></svg>
+            <p>No expenses</p>
+            <span>No expense records for this period.</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="report-grid">
+    <!-- Income by source -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Income by Source</h3>
+            <span class="row-count">{{ income_by_source|length }} sources</span>
+        </div>
+        {% if income_by_source %}
+        {% for row in income_by_source %}
+        <div class="bar-row">
+            <div class="br-head">
+                <span>{{ row.source__name|default:"Uncategorized" }}<span class="sub">{{ row.n }} entries &middot; {{ row.share }}%</span></span>
+                <span class="val">{{ row.total|as_currency_compact:currency }}</span>
+            </div>
+            <div class="hbar income"><span data-width="{{ row.bar }}"></span></div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            <p>No income</p>
+            <span>No income records for this period.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Top crops -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Top Crops by Revenue</h3>
+            <span class="row-count">Top {{ revenue_by_crop|length }}</span>
+        </div>
+        {% if revenue_by_crop %}
+        {% for row in revenue_by_crop %}
+        <div class="bar-row">
+            <div class="br-head">
+                <span>{{ row.harvest__crop_season__crop__name|default:"-" }}<span class="sub">{{ row.n }} sales &middot; {{ row.qty }} kg</span></span>
+                <span class="val">{{ row.total|as_currency_compact:currency }}<span class="sub">{{ row.share }}%</span></span>
+            </div>
+            <div class="hbar crop"><span data-width="{{ row.bar }}"></span></div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/></svg>
+            <p>No sales</p>
+            <span>No crop sales recorded for this period.</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Budget: planned vs actual -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Budget Performance — Planned vs Actual</h3>
+        <a class="link" href="{% url 'model_list' app='budgets' model='budget' %}">View all budgets &rarr;</a>
+    </div>
+    {% if budget_rows %}
+    <table class="list-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Budget</th>
+                <th>Status</th>
+                <th class="num">Planned</th>
+                <th class="num">Actual Spend</th>
+                <th class="num">Remaining</th>
+                <th style="width: 180px;">Used</th>
+                <th class="num">Variance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in budget_rows %}
+            <tr>
+                <td style="font-weight:600;">{{ b.name }}</td>
+                <td class="muted">{{ b.status }}</td>
+                <td class="num">{{ b.planned|as_currency:currency }}</td>
+                <td class="num">{{ b.spent|as_currency:currency }}</td>
+                <td class="num {% if b.remaining < 0 %}var up{% endif %}">{{ b.remaining|as_currency:currency }}</td>
+                <td>
+                    <div class="hbar budget {% if b.over %}over{% endif %}"><span data-width="{{ b.bar }}"></span></div>
+                </td>
+                <td class="num">
+                    {% if b.over %}
+                    <span class="var up">&#9650; {{ b.used_pct }}%</span>
+                    {% else %}
+                    <span class="var down">&#9660; {{ b.used_pct }}%</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <p>No budgets</p>
+        <span>Create a budget to compare planned vs actual spending.</span>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Monthly detail table -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Monthly Detail</h3>
+        <span class="row-count">{{ monthly_rows|length }} months</span>
+    </div>
+    {% if monthly_rows %}
+    <table class="list-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="num">Income</th>
+                <th class="num">Expenses</th>
+                <th class="num">Net</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in monthly_rows %}
+            <tr>
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.income|as_currency:currency }}</td>
+                <td class="num">{{ row.expense|as_currency:currency }}</td>
+                <td class="num"><span class="var {% if row.net >= 0 %}down{% else %}up{% endif %}">{{ row.net|as_currency:currency }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <p>No activity</p>
+        <span>Monthly breakdown will appear here.</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

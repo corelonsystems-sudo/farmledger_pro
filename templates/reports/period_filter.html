@@ -1,0 +1,58 @@
+<details class="filter-panel" {% if date_from or date_to or crop or season or year %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        {% if show_sales_filters %}Sales Filters{% else %}Report Period{% endif %}
+        {% if date_from or date_to or crop or season or year %}
+        <span class="active-count">{% if date_from or date_to %}{{ date_from|default:"Start" }} &rarr; {{ date_to|default:"Today" }}{% else %}All Time{% endif %}{% if year %} &middot; {{ year }}{% endif %}{% if crop or season %} &middot; Crop/Season{% endif %}</span>
+        {% else %}
+        <span class="active-count" style="background:#e2e8f0; color:#475569;">All Time</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form method="get"{% if report_workspace %} action="{% url 'reports' %}"{% endif %}>
+        {% if report_workspace %}<input type="hidden" name="section" value="{{ report_section }}">{% endif %}
+        <div class="filter-body">
+            <div class="form-group">
+                <label>From Date</label>
+                <input type="date" name="date_from" value="{{ date_from }}">
+            </div>
+            <div class="form-group">
+                <label>To Date</label>
+                <input type="date" name="date_to" value="{{ date_to }}">
+            </div>
+            {% if show_sales_filters %}
+            <div class="form-group">
+                <label for="sales-year">Report Year</label>
+                <select id="sales-year" name="year">
+                    <option value="">All years</option>
+                    {% for option in year_options %}
+                    <option value="{{ option }}" {% if year == option|stringformat:"s" %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sales-crop">Crop</label>
+                <select id="sales-crop" name="crop">
+                    <option value="">All crops</option>
+                    {% for option in crop_options %}
+                    <option value="{{ option.pk }}" {% if crop == option.pk|stringformat:"s" %}selected{% endif %}>{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="sales-season">Crop Season</label>
+                <select id="sales-season" name="season">
+                    <option value="">All seasons</option>
+                    {% for option in season_options %}
+                    <option value="{{ option.pk }}" {% if season == option.pk|stringformat:"s" %}selected{% endif %}>{{ option.crop.name|default:"Unassigned" }} - {{ option.season_label|default:option.field.name }} ({{ option.planting_date|date:"Y" }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <div class="filter-actions">
+                <button type="submit" class="btn btn-primary">Apply</button>
+                <a href="{% if report_workspace %}{% url 'reports' %}?section={{ report_section }}{% else %}{{ request.path }}{% endif %}" class="btn btn-secondary">Reset</a>
+            </div>
+        </div>
+    </form>
+</details>

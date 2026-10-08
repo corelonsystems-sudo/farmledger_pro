@@ -1,0 +1,201 @@
+{% extends report_base_template|default:'dashboard/base.html' %}
+{% load currency_tags %}
+
+{% block title %}Production Report - FarmLedger Pro{% endblock %}
+{% block nav_report_production %}active{% endblock %}
+{% block breadcrumbs %}Reports / Production{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "reports/report_styles.html" %}
+{% endblock %}
+
+{% block content %}
+{% include "reports/section_header.html" with title="Production Report" subtitle="Harvest output, crop performance and field productivity." eyebrow="Production report" %}
+
+{% include "reports/period_filter.html" %}
+
+<div class="hero-strip">
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 00-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg></div>
+        <div>
+            <div class="h-value">{{ total_qty|compact }} kg</div>
+            <div class="h-label">Total Harvested</div>
+            <div class="h-sub">{{ harvest_count }} harvest records</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
+        <div>
+            <div class="h-value">{{ yield_per_acre|compact }} kg/ac</div>
+            <div class="h-label">Yield per Acre</div>
+            <div class="h-sub">{{ field_acreage }} ac active farmland</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L23 6H6"/></svg></div>
+        <div>
+            <div class="h-value">{{ sold_rate }}%</div>
+            <div class="h-label">Harvest Sold</div>
+            <div class="h-sub">{{ sold_total|compact }} kg of {{ total_qty|compact }} kg</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div>
+        <div>
+            <div class="h-value {% if total_waste_value %}loss{% endif %}">{{ total_waste_qty|compact }} kg</div>
+            <div class="h-label">Waste Produced</div>
+            <div class="h-sub">{{ total_waste_value|as_currency:currency }} est. loss</div>
+        </div>
+    </div>
+</div>
+
+<!-- Season pipeline strip -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Season Pipeline</h3>
+        <span class="row-count">{{ season_count }} seasons &middot; {{ growing }} growing</span>
+    </div>
+    {% if pipeline %}
+    <div class="pipeline-wrap">
+        <div class="pipeline">
+            {% for s in pipeline %}
+            <span class="pseg" data-width="{{ s.share }}" data-bg="{{ s.color }}" title="{{ s.label }}: {{ s.total }} seasons ({{ s.share }}%)"></span>
+            {% endfor %}
+        </div>
+        <div class="pipeline-legend">
+            {% for s in pipeline %}
+            <span class="pstep"><span class="lg-dot" data-bg="{{ s.color }}"></span>{{ s.label }} <b>{{ s.total }}</b><span class="muted">{{ s.share }}%</span></span>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+        <p>No seasons</p>
+        <span>Crop seasons will appear here.</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="report-grid">
+    <!-- Monthly harvest chart -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Harvest Volume</h3>
+            <span class="row-count">{{ monthly_rows|length }} months</span>
+        </div>
+        {% if monthly_rows %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for m in monthly_rows %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ m.pct }}" title="{{ m.label }}: {{ m.value }} kg"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for m in monthly_rows %}<span>{{ m.label }}</span>{% endfor %}
+            </div>
+            <div class="chart-legend">
+                <span><span class="dot in"></span>Harvested (kg)</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 00-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg>
+            <p>No harvests</p>
+            <span>No harvest records for this period.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Crop production donut -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Crop Structure</h3>
+            <span class="row-count">share of harvest</span>
+        </div>
+        {% if crop_donut %}
+        {% include "reports/donut.html" with segments=crop_donut center_num=total_qty|compact center_lbl="kg Harvested" %}
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6 4"/></svg>
+            <p>No harvests</p>
+            <span>Crop structure will appear here.</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Yield per crop -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Yield Per Crop</h3>
+        <span class="row-count">{{ crop_rows|length }} crops</span>
+    </div>
+    {% if crop_rows %}
+    <table class="list-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Crop</th>
+                <th class="num">Harvests</th>
+                <th class="num">Harvested</th>
+                <th class="num">Waste</th>
+                <th class="num">Sold</th>
+                <th style="width: 160px;">Sold %</th>
+                <th class="num">Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in crop_rows %}
+            <tr>
+                <td style="font-weight:600;">{{ row.label }}</td>
+                <td class="num">{{ row.n }}</td>
+                <td class="num">{{ row.qty }} kg</td>
+                <td class="num muted">{{ row.waste }} kg</td>
+                <td class="num">{{ row.sold }} kg</td>
+                <td>
+                    <div class="hbar crop"><span data-width="{{ row.sold_pct }}"></span></div>
+                </td>
+                <td class="num amount">{{ row.revenue|as_currency:currency }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/></svg>
+        <p>No production data</p>
+        <span>Harvest records will populate this table.</span>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Field productivity -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Production by Field</h3>
+        <a class="link" href="{% url 'model_list' app='fields' model='field' %}">All fields &rarr;</a>
+    </div>
+    {% if field_rows %}
+    {% for row in field_rows %}
+    <div class="bar-row">
+        <div class="br-head">
+            <span>{{ row.label }}<span class="sub">{{ row.n }} harvests</span></span>
+            <span class="val">{{ row.qty|compact }} kg{% if row.per_acre %}<span class="sub">{{ row.per_acre|compact }} kg/ac</span>{% endif %}</span>
+        </div>
+        <div class="hbar crop"><span data-width="{{ row.bar }}"></span></div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        <p>No field data</p>
+        <span>Field productivity will appear here.</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

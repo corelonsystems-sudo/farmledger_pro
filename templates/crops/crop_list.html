@@ -1,0 +1,205 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Crops - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Crops{% endblock %}
+{% block nav_crops %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .cat-badge {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 9px; border-radius: 12px;
+        font-size: 0.65rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.03em;
+        white-space: nowrap;
+        background: #f0fdf4; color: var(--primary);
+    }
+    .perennial-dot {
+        display: inline-block; width: 8px; height: 8px;
+        border-radius: 50%; background: var(--primary);
+        margin-right: 5px;
+    }
+    .perennial-dot.no { background: #cbd5e1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Crops</h2>
+        <p>Manage your crop catalog — grains, vegetables, perennials, and more.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Crop">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add Crop
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Total Crops</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.perennial }}</div>
+            <div class="kpi-label">Perennial</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5M9 21V11M15 21V11"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.active_seasons }}</div>
+            <div class="kpi-label">Seasons</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M3 7v14M21 7v14M3 7l9-5 9 5"/><path d="M7 12h4l-2 4h4l-2 4"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_qty }} kg</div>
+            <div class="kpi-label">Total Harvested</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.category or filters.perennial or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.category or filters.perennial or q %}
+        <span class="active-count">Active</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Name, scientific name...">
+        </div>
+        <div class="form-group">
+            <label for="category">Category</label>
+            <select name="category" id="category">
+                <option value="">All Categories</option>
+                {% for value, label in categories %}
+                <option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="perennial">Type</label>
+            <select name="perennial" id="perennial">
+                <option value="">All</option>
+                <option value="1" {% if filters.perennial == '1' %}selected{% endif %}>Perennial</option>
+                <option value="0" {% if filters.perennial == '0' %}selected{% endif %}>Annual</option>
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Crop Catalog</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} crop{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if crops %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Crop</th>
+                    <th>Category</th>
+                    <th>Unit</th>
+                    <th>Growing Days</th>
+                    <th>Type</th>
+                    <th class="num">Seasons</th>
+                    <th class="num">Harvests</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for crop in crops %}
+                <tr>
+                    <td>
+                        <a class="link" href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a>
+                        {% if crop.scientific_name %}
+                        <div class="sub-text">{{ crop.scientific_name }}</div>
+                        {% endif %}
+                    </td>
+                    <td><span class="cat-badge">{{ crop.get_category_display }}</span></td>
+                    <td>{{ crop.default_unit }}{% if crop.secondary_unit %} / {{ crop.secondary_unit }}{% endif %}</td>
+                    <td>{{ crop.growing_season_days|default:"-" }}</td>
+                    <td>
+                        <span class="perennial-dot {% if not crop.is_perennial %}no{% endif %}"></span>
+                        {% if crop.is_perennial %}Perennial{% else %}Annual{% endif %}
+                    </td>
+                    <td class="num">{{ crop.season_count }}</td>
+                    <td class="num">{{ crop.harvest_count }}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn view" href="{% url 'crop_detail' crop.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=crop.pk %}" data-modal-title="Edit Crop" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=crop.pk %}" data-modal-title="Delete Crop" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+        <p>No crops found</p>
+        <span>Try adjusting your filters, or add a new crop.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,188 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Income Sources - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Finance &rsaquo; Income Sources{% endblock %}
+{% block nav_income_sources %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .code-badge {
+        display: inline-block;
+        background: var(--primary);
+        color: white;
+        font-size: 0.68rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+        letter-spacing: 0.04em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Income Sources</h2>
+        <p>Manage income categories and track totals per Schedule F line.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Income Source">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Add Source
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Total Sources</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_records }}</div>
+            <div class="kpi-label">Income Records</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_amount|as_currency:currency }}</div>
+            <div class="kpi-label">Total Amount</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.pending }}</div>
+            <div class="kpi-label">Pending</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.schedule_f or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.schedule_f or q %}
+        <span class="active-count">Active</span>
+        {% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Name, code, description...">
+        </div>
+        <div class="form-group">
+            <label for="schedule_f">Schedule F Line</label>
+            <select name="schedule_f" id="schedule_f">
+                <option value="">All Lines</option>
+                {% for value, label in schedule_f_lines %}
+                <option value="{{ value }}" {% if filters.schedule_f == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Income Sources</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} source{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if income_sources %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Schedule F Line</th>
+                    <th class="num">Records</th>
+                    <th class="num">Pending</th>
+                    <th class="num">Total Amount</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for source in income_sources %}
+                <tr>
+                    <td><span class="code-badge">{{ source.code|default:"—" }}</span></td>
+                    <td>
+                        <a class="link" href="{% url 'income_source_detail' source.pk %}">{{ source.name }}</a>
+                        {% if source.description %}
+                        <div class="sub-text">{{ source.description|truncatewords:8 }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ source.get_schedule_f_line_display }}</td>
+                    <td class="num">{{ source.income_count }}</td>
+                    <td class="num">{{ source.pending_count }}</td>
+                    <td class="num amount">{{ source.total_amount|as_currency:currency }}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn view" href="{% url 'income_source_detail' source.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=source.pk %}" data-modal-title="Edit Income Source" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=source.pk %}" data-modal-title="Delete Income Source" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <p>No income sources found</p>
+        <span>Try adjusting your filters, or add a new source.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

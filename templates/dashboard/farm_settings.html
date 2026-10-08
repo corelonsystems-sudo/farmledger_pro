@@ -1,0 +1,197 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Farm Settings{% endblock %}
+{% block nav_farms %}active{% endblock %}
+{% block breadcrumbs %}Dashboard &rsaquo; Farm Settings{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .settings-grid .wide { grid-column: 1 / -1; }
+    @media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
+    .section-table { width: 100%; border-collapse: collapse; }
+    .section-table th {
+        text-align: left; color: var(--text-muted); font-size: 0.68rem; font-weight: 700;
+        padding: 8px 12px; border-bottom: 1px solid var(--border);
+        text-transform: uppercase; letter-spacing: 0.04em; background: #f8fafc; white-space: nowrap;
+    }
+    .section-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+    .section-table tbody tr:last-child td { border-bottom: none; }
+    .section-table tbody tr:hover td { background: #f8fafc; }
+    .muted { color: var(--text-muted); }
+    .row-actions { display: inline-flex; gap: 6px; }
+    .mini-btn {
+        background: #eff6ff; color: var(--blue); border: none; border-radius: 5px;
+        height: 26px; min-width: 26px; padding: 0 7px; display: inline-grid; place-items: center;
+        cursor: pointer; font-size: 0.68rem; font-weight: 600; text-decoration: none;
+    }
+    .mini-btn.danger { background: #fef2f2; color: var(--red); }
+    .mini-btn:hover { filter: brightness(0.95); }
+    .pill-badge { padding: 2px 9px; border-radius: 12px; font-size: 0.68rem; font-weight: 700; }
+    .pill-green { background: #d1fae5; color: #065f46; }
+    .pill-blue { background: #dbeafe; color: #1e40af; }
+    .pill-amber { background: #fef3c7; color: #92400e; }
+    .pill-slate { background: #e2e8f0; color: #475569; }
+    .farm-logo { width: 30px; height: 30px; border-radius: 6px; object-fit: cover; vertical-align: middle; margin-right: 8px; }
+    .add-btn {
+        background: var(--primary); color: #fff; border: none; border-radius: 7px;
+        padding: 6px 12px; font-size: 0.74rem; font-weight: 600; cursor: pointer; text-decoration: none;
+    }
+    .add-btn:hover { background: var(--primary-dark); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="settings-grid">
+
+    {# -- Farm Profiles -- #}
+    <div class="table-card wide">
+        <div class="table-card-head">
+            <h3>Farm Profiles</h3>
+            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmprofile' %}?next=/dashboard/settings/" data-modal-title="New Farm">+ New Farm</a>
+        </div>
+        {% if farms %}
+        <div style="overflow-x:auto;">
+        <table class="section-table">
+            <thead>
+                <tr><th>Farm</th><th>Location</th><th>Acreage</th><th>Phone</th><th>Currency</th><th>Owner</th><th style="text-align:right;">Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for farm in farms %}
+                <tr>
+                    <td>
+                        {% if farm.logo %}<img class="farm-logo" src="{{ farm.logo.url }}" alt="">{% endif %}
+                        <strong>{{ farm.farm_name }}</strong>
+                    </td>
+                    <td class="muted">{{ farm.location|default:"-" }}</td>
+                    <td>{{ farm.acreage }}</td>
+                    <td class="muted">{{ farm.phone|default:"-" }}</td>
+                    <td>{{ farm.default_currency.code|default:"-" }}</td>
+                    <td class="muted">{{ farm.user.username }}</td>
+                    <td style="text-align:right;">
+                        {% if can_edit_farms %}
+                        <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmprofile' pk=farm.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ farm.farm_name }}">Edit</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No farm profile yet</p><span>Create one to get started.</span></div>
+        {% endif %}
+    </div>
+
+    {# -- Farm Team -- #}
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Farm Team</h3>
+            {% if can_manage_team %}
+            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmmembership' %}?next=/dashboard/settings/" data-modal-title="Add Farm Member">+ Add Member</a>
+            {% endif %}
+        </div>
+        {% if memberships %}
+        <div style="overflow-x:auto;">
+        <table class="section-table">
+            <thead>
+                <tr><th>Farm</th><th>Member</th><th>Role</th><th style="text-align:right;">Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for m in memberships %}
+                <tr>
+                    <td>{{ m.farm_profile.farm_name }}</td>
+                    <td>
+                        <strong>{{ m.user.username }}</strong>
+                        {% if m.user.first_name or m.user.last_name %}<span class="muted">({{ m.user.get_full_name }})</span>{% endif %}
+                    </td>
+                    <td><span class="pill-badge {% if m.role == 'OWNER' %}pill-green{% elif m.role == 'MANAGER' %}pill-blue{% elif m.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{{ m.get_role_display }}</span></td>
+                    <td style="text-align:right;">
+                        {% if can_manage_team %}
+                        <div class="row-actions">
+                            <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Edit Membership">Edit</a>
+                            <a class="mini-btn danger" href="javascript:void(0)" data-modal-url="{% url 'model_delete' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Remove Member">Remove</a>
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No team members</p><span>Add users to share farm access.</span></div>
+        {% endif %}
+    </div>
+
+    {# -- Users -- #}
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Users</h3>
+            {% if can_manage_users %}
+            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='user' %}?next=/dashboard/settings/" data-modal-title="New User">+ New User</a>
+            {% endif %}
+        </div>
+        {% if users %}
+        <div style="overflow-x:auto;">
+        <table class="section-table">
+            <thead>
+                <tr><th>Username</th><th>Name</th><th>Role</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td><strong>{{ u.username }}</strong></td>
+                    <td class="muted">{{ u.get_full_name|default:"-" }}</td>
+                    <td><span class="pill-badge {% if u.is_superuser %}pill-green{% elif u.role == 'MANAGER' %}pill-blue{% elif u.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{% if u.is_superuser %}Administrator{% else %}{{ u.get_role_display }}{% endif %}</span></td>
+                    <td>{% if u.is_active %}<span class="pill-badge pill-green">Active</span>{% else %}<span class="pill-badge pill-slate">Inactive</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No users</p></div>
+        {% endif %}
+    </div>
+
+    {# -- Currencies -- #}
+    <div class="table-card wide">
+        <div class="table-card-head">
+            <h3>Currencies</h3>
+            {% if can_manage_currencies %}
+            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='currency' %}?next=/dashboard/settings/" data-modal-title="New Currency">+ New Currency</a>
+            {% endif %}
+        </div>
+        {% if currencies %}
+        <div style="overflow-x:auto;">
+        <table class="section-table">
+            <thead>
+                <tr><th>Code</th><th>Name</th><th>Symbol</th><th>Rate (per USD)</th><th>Default</th><th style="text-align:right;">Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for cur in currencies %}
+                <tr>
+                    <td><strong>{{ cur.code }}</strong></td>
+                    <td>{{ cur.name }}</td>
+                    <td>{{ cur.symbol }}</td>
+                    <td class="muted">{{ cur.rate }}</td>
+                    <td>{% if cur.is_default %}<span class="pill-badge pill-green">Default</span>{% endif %}</td>
+                    <td style="text-align:right;">
+                        {% if can_manage_currencies %}
+                        <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='currency' pk=cur.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ cur.code }}">Edit</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No currencies configured</p></div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

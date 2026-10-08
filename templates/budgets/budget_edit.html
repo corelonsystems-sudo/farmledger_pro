@@ -1,0 +1,210 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ action }} Operating Budget{% endblock %}
+{% block nav_budgets %}active{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='budgets' model='budget' %}">Budgets</a> &rsaquo; {{ action }} Budget{% endblock %}
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .planner-hero { background:#1b4332; color:white; padding:24px; border-radius:12px; margin-bottom:16px; }
+    .planner-hero h1 { margin:0 0 8px; font-size:1.4rem; }
+    .planner-hero p { margin:0; opacity:.85; font-size:.85rem; }
+    .planner-steps { display:flex; gap:20px; flex-wrap:wrap; margin-top:18px; font-size:.8rem; }
+    .planner-panel { background:white; border:1px solid var(--border); border-radius:10px; margin-bottom:18px; overflow:hidden; }
+    .planner-panel header { display:flex; justify-content:space-between; align-items:center; gap:12px; background:#f2f4f3; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .planner-panel h2 { margin:0; font-size:1rem; }
+    .planner-panel header p { margin:5px 0 0; color:var(--text-muted); font-size:.76rem; }
+    .profile-fields { padding:18px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+    .budget-line { padding:16px 18px; border-bottom:1px solid var(--border); display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; align-items:start; }
+    .budget-line:last-child { border-bottom:0; }
+    .budget-line [hidden] { display:none; }
+    .budget-line .field-notes { grid-column:span 2; }
+    .budget-line .field-DELETE { align-self:end; }
+    .budget-line .field-DELETE input { width:auto; }
+    .planner-panel label { display:block; font-weight:600; font-size:.72rem; margin-bottom:5px; }
+    .planner-panel input,.planner-panel select,.planner-panel textarea { width:100%; min-width:0; border:1px solid #d1d9d5; border-radius:5px; padding:8px; font:inherit; font-size:.8rem; background:white; }
+    .planner-panel input:focus,.planner-panel select:focus,.planner-panel textarea:focus { outline:2px solid #95d5b2; }
+    .planner-panel input[name$="planned_amount"] { background:#fffbdb; }
+    #items-lines .field-schedule_line { display:none; }
+    #items-lines .budget-line.is-linked { display:none; }
+    .line-preview { grid-column:1/-1; font-size:.72rem; color:#43534a; background:#eef5f1; border:1px dashed #b7cdc0; border-radius:6px; padding:6px 10px; }
+    .errorlist { color:#b91c1c; font-size:.75rem; padding-left:18px; }
+    .planner-alert { padding:10px 18px; background:#fff7ed; color:#9a3412; font-size:.8rem; }
+    .planner-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:16px 0; }
+    .planner-summary div { background:#eef5f1; border:1px solid #cbded1; padding:16px; border-radius:8px; }
+    .planner-summary span { display:block; font-size:.74rem; color:#536259; margin-bottom:6px; }
+    .planner-summary strong { font-size:1.15rem; font-variant-numeric:tabular-nums; }
+    .planner-save { display:flex; justify-content:flex-end; gap:10px; padding:14px 0; }
+    .planner-guide { color:var(--text-muted); font-size:.78rem; margin:12px 0 18px; }
+    @media(max-width:1000px) { .budget-line { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+    @media(max-width:650px) { .profile-fields,.budget-line,.planner-summary { grid-template-columns:1fr; } .budget-line .field-notes { grid-column:auto; } }
+</style>
+{% endblock %}
+{% block content %}
+<section class="planner-hero">
+    <h1>{{ action }} Annual Operating Budget</h1>
+    <p>Plan how the farm will be funded, then allocate expenditure by enterprise and activity.</p>
+    <div class="planner-steps"><span>01 &nbsp; Budget details</span><span>02 &nbsp; Sources of income</span><span>03 &nbsp; Enterprise expenditure</span><span>04 &nbsp; Review and save</span></div>
+</section>
+<form method="post" id="budget-planner">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <section class="planner-panel">
+        <header><div><h2>1. Budget Details</h2><p>Name the plan, select the farm and set the operating period.</p></div></header>
+        <div class="profile-fields">{% for field in form %}<div><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}</div>
+    </section>
+    <p class="planner-guide">Enter amounts in {{ default_currency.code }} (the input currency). Blank amounts remain <strong>unconfirmed</strong>, not confirmed zero costs. Figures entered here are plans, not accounting transactions. Line codes can be entered manually or generated on save.</p>
+    <section class="planner-panel">
+        <header><div><h2>2. Sources of Income</h2><p>Separate own capital, loans and operating revenue. Do not count a loan as sales revenue.</p></div><button class="btn btn-secondary" type="button" data-add-line="incomes">+ Income source</button></header>
+        {{ income_formset.management_form }}
+        {{ income_formset.non_form_errors }}
+        <div id="incomes-lines">{% for line_form in income_formset %}{% include "budgets/budget_line_fields.html" %}{% endfor %}</div>
+    </section>
+    <section class="planner-panel">
+        <header><div><h2>3. Expenditure by Enterprise / Cost Centre</h2><p>Register one row per subcode — every schedule line linked to it is shown automatically as a line item. Enter the figure on the subcode row only; line items carry no amount.</p></div><button class="btn btn-secondary" type="button" data-add-line="items">+ Expenditure line</button></header>
+        {{ item_formset.management_form }}
+        {{ item_formset.non_form_errors }}
+        <div id="items-lines">{% for line_form in item_formset %}{% include "budgets/budget_line_fields.html" %}{% endfor %}</div>
+    </section>
+    <div class="planner-summary" aria-live="polite">
+        <div><span>Total planned income ({{ default_currency.code }})</span><strong id="planned-income">0.00</strong></div>
+        <div><span>Total planned expenditure ({{ default_currency.code }})</span><strong id="planned-expenditure">0.00</strong></div>
+        <div><span>Funding surplus / shortfall ({{ default_currency.code }})</span><strong id="funding-balance">0.00</strong></div>
+    </div>
+    <p class="planner-guide">Subtotals are calculated from detail lines only, so activity heads are never counted twice. A negative balance indicates a funding shortfall. Review unconfirmed lines before activating the plan.</p>
+    <div class="planner-save"><a class="btn btn-secondary" href="{% if budget.pk %}{% url 'budget_detail' budget.pk %}{% else %}{% url 'model_list' app='budgets' model='budget' %}{% endif %}">Cancel</a><button class="btn btn-primary" type="submit">Save Budget Plan</button></div>
+</form>
+<datalist id="cost-centres"><option value="Crops"><option value="Livestock"><option value="Poultry"><option value="Equipment"><option value="Operations"><option value="Finance"><option value="General"></datalist>
+<template id="incomes-empty">{% include "budgets/budget_line_fields.html" with line_form=income_formset.empty_form %}</template>
+<template id="items-empty">{% include "budgets/budget_line_fields.html" with line_form=item_formset.empty_form %}</template>
+{{ subcode_categories|json_script:"subcode-cats" }}
+{{ line_subcodes|json_script:"line-subcodes" }}
+{{ sub_lines|json_script:"sub-lines" }}
+<script>
+(function () {
+    const planner = document.getElementById('budget-planner');
+    const format = value => (value / 100).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    function sum(prefix) {
+        let total = 0;
+        document.querySelectorAll('#' + prefix + '-lines .budget-line').forEach(row => {
+            const deleted = row.querySelector('input[name$="-DELETE"]');
+            const amount = row.querySelector('input[name$="-planned_amount"]');
+            if (deleted && deleted.checked) return;
+            if (amount && amount.value) total += Math.round(Number(amount.value) * 100) || 0;
+        });
+        return total;
+    }
+    function update() {
+        const income = sum('incomes'), expense = sum('items');
+        document.getElementById('planned-income').textContent = format(income);
+        document.getElementById('planned-expenditure').textContent = format(expense);
+        const balance = document.getElementById('funding-balance');
+        balance.textContent = format(income - expense);
+        balance.style.color = income < expense ? '#b91c1c' : '#1b4332';
+    }
+    const SUBCODE_CATS = JSON.parse(document.getElementById('subcode-cats').textContent);
+    const LINE_SUBCODES = JSON.parse(document.getElementById('line-subcodes').textContent);
+    const SUB_LINES = JSON.parse(document.getElementById('sub-lines').textContent);
+    function addItemRow() {
+        const container = document.getElementById('items-lines');
+        const count = document.getElementById('id_items-TOTAL_FORMS');
+        if (Number(count.value) >= 300) return null;
+        const content = document.getElementById('items-empty').innerHTML.replace(/__prefix__/g, count.value);
+        container.insertAdjacentHTML('beforeend', content);
+        count.value = Number(count.value) + 1;
+        return container.lastElementChild;
+    }
+    function renderLinePreview(row) {
+        const sel = row.querySelector('select[name$="-schedule_line"]');
+        const isLinked = sel && sel.value;
+        const subSelect = row.querySelector('select[name$="-subcode"]');
+        const lines = subSelect && subSelect.value ? (SUB_LINES[subSelect.value] || []) : [];
+        let preview = row.querySelector('.line-preview');
+        if (isLinked || !lines.length) {
+            if (preview) preview.remove();
+            return;
+        }
+        if (!preview) {
+            preview = document.createElement('div');
+            preview.className = 'line-preview';
+            row.appendChild(preview);
+        }
+        preview.textContent = 'Line items (auto): ' +
+            lines.map(line => (line.code ? line.code + ' - ' : '') + line.name).join(' \u00B7 ');
+    }
+    function syncLineItems(row) {
+        const subSelect = row.querySelector('select[name$="-subcode"]');
+        const lineSelect = row.querySelector('select[name$="-schedule_line"]');
+        if (!lineSelect) return;
+        if (!lineSelect._all) lineSelect._all = Array.from(lineSelect.options).map(o => o.cloneNode(true));
+        const sub = subSelect ? subSelect.value : '';
+        const current = lineSelect.value;
+        lineSelect.innerHTML = '';
+        lineSelect._all.forEach(opt => {
+            const owner = LINE_SUBCODES[opt.value];
+            if (!opt.value || !sub || owner == null || String(owner) === sub) lineSelect.appendChild(opt.cloneNode(true));
+        });
+        const ownerOfCurrent = LINE_SUBCODES[current];
+        lineSelect.value = (!sub || ownerOfCurrent == null || String(ownerOfCurrent) === sub) ? current : '';
+    }
+    function syncSubcodes(catSelect) {
+        const row = catSelect.closest('.budget-line');
+        const subSelect = row && row.querySelector('select[name$="-subcode"]');
+        if (!subSelect) return;
+        if (!subSelect._all) subSelect._all = Array.from(subSelect.options).map(o => o.cloneNode(true));
+        const cat = catSelect.value;
+        const current = subSelect.value;
+        subSelect.innerHTML = '';
+        subSelect._all.forEach(opt => {
+            if (!opt.value || String(SUBCODE_CATS[opt.value]) === cat) subSelect.appendChild(opt.cloneNode(true));
+        });
+        subSelect.value = String(SUBCODE_CATS[current]) === cat ? current : '';
+        syncLineItems(row);
+    }
+    function lockLineSelects() {
+        document.querySelectorAll('#items-lines .budget-line').forEach(row => {
+            const sel = row.querySelector('select[name$="-schedule_line"]');
+            if (sel && sel.value) row.classList.add('is-linked');
+        });
+    }
+    function syncAllSubcodes() {
+        document.querySelectorAll('#items-lines select[name$="-category"]').forEach(syncSubcodes);
+        lockLineSelects();
+    }
+    planner.addEventListener('change', function (event) {
+        const sel = event.target.closest('#items-lines select[name$="-category"]');
+        if (sel) syncSubcodes(sel);
+        const sub = event.target.closest('#items-lines select[name$="-subcode"]');
+        if (sub) {
+            const row = sub.closest('.budget-line');
+            syncLineItems(row);
+            renderLinePreview(row);
+            lockLineSelects();
+        }
+    });
+    planner.addEventListener('input', update);
+    planner.addEventListener('change', update);
+    planner.addEventListener('click', function (event) {
+        const button = event.target.closest('[data-add-line]');
+        if (!button) return;
+        const prefix = button.dataset.addLine;
+        if (prefix === 'items') {
+            if (addItemRow()) syncAllSubcodes();
+        } else {
+            const count = document.getElementById('id_' + prefix + '-TOTAL_FORMS');
+            if (Number(count.value) >= 300) return;
+            const content = document.getElementById(prefix + '-empty').innerHTML.replace(/__prefix__/g, count.value);
+            document.getElementById(prefix + '-lines').insertAdjacentHTML('beforeend', content);
+            count.value = Number(count.value) + 1;
+        }
+        update();
+    });
+    syncAllSubcodes();
+    document.querySelectorAll('#items-lines .budget-line').forEach(row => {
+        const del = row.querySelector('input[name$="-DELETE"]');
+        if (!(del && del.checked)) renderLinePreview(row);
+    });
+    lockLineSelects();
+    update();
+})();
+</script>
+{% endblock %}

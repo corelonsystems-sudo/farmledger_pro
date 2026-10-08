@@ -1,0 +1,200 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Budgets - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Budgets{% endblock %}
+{% block nav_budgets %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .period-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Budgets</h2>
+        <p>Plan income and expenditure by enterprise, then track actual spending against each coded line.</p>
+    </div>
+    <div class="page-actions">
+        {% include "reports/export_menu.html" %}
+        {% if can_create_budget %}<a class="btn btn-primary" href="{% url 'budget_new' %}" style="display:inline-flex; align-items:center; gap:6px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Budget
+        </a>{% endif %}
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Total Budgets</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.active_count }}</div>
+            <div class="kpi-label">Active</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_planned|as_currency:currency }}</div>
+            <div class="kpi-label">Planned</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_spent|as_currency:currency }}</div>
+            <div class="kpi-label">Spent</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.status or filters.farm or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.status or filters.farm or q %}<span class="active-count">Active</span>{% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Budget or farm name...">
+        </div>
+        <div class="form-group">
+            <label for="status">Status</label>
+            <select name="status" id="status">
+                <option value="">All Statuses</option>
+                {% for value, label in statuses %}
+                <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="farm">Farm</label>
+            <select name="farm" id="farm">
+                <option value="">All Farms</option>
+                {% for f in farms %}
+                <option value="{{ f.pk }}" {% if filters.farm == f.pk|stringformat:"i" %}selected{% endif %}>{{ f.farm_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Budgets</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} budget{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if budgets %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Budget</th>
+                    <th>Farm</th>
+                    <th>Status</th>
+                    <th class="num">Items</th>
+                    <th class="num">Planned Income</th>
+                    <th class="num">Expenditure</th>
+                    <th class="num">Funding Balance</th>
+                    <th class="num">Spent</th>
+                    <th class="num">Remaining</th>
+                    <th>Progress</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in budgets %}
+                <tr>
+                    <td>
+                        <a class="link" href="{% url 'budget_detail' b.pk %}">{{ b.name|default:"Untitled Budget" }}</a>
+                        <div class="sub-text period-sub">{{ b.start_date|default:"-" }} &rarr; {{ b.end_date|default:"-" }}</div>
+                    </td>
+                    <td>{{ b.farm_profile|default:"-" }}</td>
+                    <td><span class="status-badge {{ b.status|lower }}">{{ b.get_status_display }}</span></td>
+                    <td class="num">{{ b.item_count }}</td>
+                    <td class="num amount">{{ b.income_planned|as_currency:currency }}</td>
+                    <td class="num amount">{{ b.planned|as_currency:currency }}</td>
+                    <td class="num amount{% if b.funding_gap < 0 %} cell-red{% endif %}">{{ b.funding_gap|as_currency:currency }}</td>
+                    <td class="num amount">{{ b.spent|as_currency:currency }}</td>
+                    <td class="num amount{% if b.remaining_amt < 0 %} cell-red{% endif %}">{{ b.remaining_amt|as_currency:currency }}</td>
+                    <td class="pct-cell">
+                        <div class="pct-label">{{ b.burn_pct }}%</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill {% if b.burn_pct > 100 %}over{% elif b.burn_pct > 80 %}warning{% else %}normal{% endif %}"
+                                 data-width="{{ b.burn_pct }}"></div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="action-btn view" href="{% url 'budget_detail' b.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            {% if b.can_edit %}<a class="action-btn" href="{% url 'budget_edit' b.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=b.pk %}" data-modal-title="Delete Budget" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>{% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <p>No budgets found</p>
+        <span>Try adjusting your filters, or create a new budget.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

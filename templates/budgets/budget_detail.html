@@ -1,0 +1,188 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ budget.name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='budgets' model='budget' %}">Budgets</a> &rsaquo; {{ budget.name }}{% endblock %}
+{% block nav_budgets %}active{% endblock %}
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; font-size:1.8rem; font-weight:700; }
+    .budget-avatar img { width:100%; height:100%; object-fit:contain; padding:6px; border-radius:14px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; background:#fff0c2; color:#795414; }
+    .budget-header-status.active { background:#d5f4df; color:#14532d; }
+    .budget-header-status.closed { background:#e2e8f0; color:#475569; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:340px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden],#budget-table-paper[hidden],[data-budget-cost-heading][hidden] { display:none!important; }
+    @media print { .budget-tabs { display:none!important; } .budget-tab-panel[hidden],#budget-table-paper[hidden],[data-budget-cost-heading][hidden] { display:block!important; } }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
+    .budget-legend { display:flex; flex-wrap:wrap; gap:18px; font-size:.76rem; margin:12px 0 18px; color:#536259; }
+    .recorded-figure { color:#1d4ed8; }
+    .estimated-figure { color:#334155; }
+    .unconfirmed-figure { background:#fff6c6; color:#854d0e; }
+    .ledger-section { margin:22px 0; }
+    .ledger-section h3 { margin:0; padding:10px 12px; color:white; background:#404a44; font-size:.85rem; text-transform:uppercase; letter-spacing:.04em; }
+    .ledger-scroll { overflow-x:auto; }
+    .ledger { width:100%; border-collapse:collapse; font-size:.72rem; }
+    .ledger th { background:#64716a; color:white; text-align:left; font-size:.6rem; padding:4px 6px; white-space:nowrap; letter-spacing:.03em; }
+    .ledger td { border:1px solid #d4dcd7; padding:2px 6px; vertical-align:middle; line-height:1.3; }
+    .ledger .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .ledger .head-row td { background:#edf0ee; font-weight:700; }
+    .ledger .subtotal td { background:#e1e8e3; font-weight:700; }
+    .ledger .notes { min-width:100px; max-width:190px; font-size:.66rem; color:#617066; overflow-wrap:anywhere; }
+    .ledger .line-label { min-width:100px; }
+    .ledger .line-code { font-family:Consolas,monospace; font-size:.66rem; white-space:nowrap; }
+    .ledger .centre-name { font-size:.66rem; color:#1b4332; font-weight:700; white-space:nowrap; }
+    .ledger .budget-footnote { margin:0; font-size:.6rem; line-height:1.25; }
+    .ledger .basis { font-size:.6rem; font-weight:700; text-transform:uppercase; margin-right:4px; }
+    .ledger .edit-line { text-decoration:none; color:#1b4332; font-weight:600; white-space:nowrap; }
+    .budget-notice { padding:12px 16px; background:#fff8db; color:#854d0e; border-radius:6px; font-size:.8rem; margin:14px 0; }
+    .reconciliation { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:22px; }
+    .reconciliation article { background:#f4f7f5; padding:16px; border:1px solid #d4dcd7; border-radius:8px; }
+    .reconciliation h3 { font-size:.9rem; margin:0 0 12px; }
+    .reconciliation p { display:flex; justify-content:space-between; gap:12px; font-size:.8rem; border-bottom:1px solid #d4dcd7; padding-bottom:9px; }
+    .balance-negative { color:#b91c1c; }
+    .budget-footnote { font-size:.75rem; color:#64748b; margin:16px 0 0; }
+    @media(max-width:700px) { .budget-paper { padding:12px; } .reconciliation { grid-template-columns:1fr; } }
+    @media print { .sidebar,.topbar,.budget-toolbar .actions,.no-print { display:none!important; } .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; } .budget-toolbar h1,.budget-eyebrow,.budget-header-tag { color:#1b4332; } .budget-header-tag { background:white; border-color:#ccd5d0; } .main { margin:0; padding:0; } .budget-paper { border:0; padding:0; } .ledger-section h3,.ledger th,.subtotal td,.head-row td { print-color-adjust:exact; -webkit-print-color-adjust:exact; } .ledger th { color:#111; } .ledger { font-size:8pt; } }
+</style>
+{% endblock %}
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="budget-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true">{% if budget.farm_profile.logo %}<img src="{{ budget.farm_profile.logo.url }}" alt="">{% else %}{{ budget.farm_profile.farm_name|default:"FarmLedger"|first|upper }}{% endif %}</div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Annual Operating Budget</p>
+            <h1 id="budget-page-title">{{ budget.name|default:"Operating Budget" }}</h1>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {{ budget.status|lower }}">{{ budget.get_status_display }}</span>
+                <span class="budget-header-tag">BDG-{{ budget.pk|stringformat:"05d" }}</span>
+                <span class="budget-header-tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg>{{ budget.start_date|date:"d M Y"|default:"Open start" }} &ndash; {{ budget.end_date|date:"d M Y"|default:"Open end" }}</span>
+                <span class="budget-header-tag">{{ currency.code }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{% url 'model_list' app='budgets' model='budget' %}">&larr; Back to Budgets</a>
+        {% if can_edit %}<a class="btn btn-primary" href="{% url 'budget_edit' budget.pk %}">Edit Budget</a>{% endif %}
+        {% include "reports/export_menu.html" %}
+        <button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>
+    </div>
+</header>
+<nav class="budget-tabs" role="tablist" aria-label="Budget sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-overview" aria-selected="true" aria-controls="budget-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-income" aria-selected="false" aria-controls="budget-income" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v12M15 8H10a2 2 0 000 4h4a2 2 0 010 4H9"/></svg>Income Sources</button>
+    {% for centre in centres %}<button type="button" class="budget-tab" role="tab" id="tab-budget-centre-{{ forloop.counter }}" aria-selected="false" aria-controls="budget-centre-{{ forloop.counter }}" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg>{{ centre.name }}</button>{% empty %}<button type="button" class="budget-tab" role="tab" id="tab-budget-expenditure-empty" aria-selected="false" aria-controls="budget-expenditure-empty" tabindex="-1">Expenditure</button>{% endfor %}
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-actual" aria-selected="false" aria-controls="budget-actual" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4"/></svg>Actual Expenses</button>
+</nav>
+<section class="budget-tab-panel" id="budget-overview" role="tabpanel" aria-labelledby="tab-budget-overview" tabindex="0">
+<div class="kpi-grid">
+    <div class="kpi-card"><div><div class="kpi-label">Planned Income</div><div class="kpi-value">{{ total_income_planned|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Planned Expenditure</div><div class="kpi-value">{{ total_planned|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Funding Surplus / Shortfall</div><div class="kpi-value {% if funding_balance < 0 %}balance-negative{% endif %}">{{ funding_balance|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Actual Expenditure</div><div class="kpi-value">{{ total_spent|as_currency:currency }}</div></div></div>
+</div>
+{% if unconfirmed_count %}<div class="budget-notice">{{ unconfirmed_count }} line{{ unconfirmed_count|pluralize }} awaiting a confirmed amount. Their blank values are excluded from totals until priced.</div>{% endif %}
+{% if not budget.farm_profile %}<div class="budget-notice">This legacy budget has no farm assignment. Assign it to a farm in Edit Budget before sharing it with farm members.</div>{% endif %}
+    <div class="reconciliation">
+        <article><h3>Funding Reconciliation</h3><p><span>Total income</span><strong>{{ total_income_planned|as_currency:currency }}</strong></p><p><span>Total expenditure</span><strong>{{ total_planned|as_currency:currency }}</strong></p><p><span>{% if funding_balance < 0 %}Funding shortfall{% else %}Funding surplus{% endif %}</span><strong class="{% if funding_balance < 0 %}balance-negative{% endif %}">{{ funding_balance|as_currency:currency }}</strong></p></article>
+        <article><h3>Execution Against Plan</h3><p><span>Actual expenditure</span><strong>{{ total_spent|as_currency:currency }}</strong></p><p><span>Remaining budget</span><strong>{{ remaining|as_currency:currency }}</strong></p><p><span>Burn rate</span><strong>{{ overall_pct }}%</strong></p></article>
+    </div>
+    {% if budget.notes %}<p class="budget-footnote">{{ budget.notes|linebreaksbr }}</p>{% endif %}
+    <p class="budget-footnote">Totals use detailed lines once; activity heads are calculated summaries. Capital and loans fund the plan but are not recorded as operating sales. Actual spend comes only from linked Expense records.</p>
+</section>
+<article class="budget-paper" id="budget-table-paper" hidden>
+    {% if budget.notes %}<p class="budget-footnote">{{ budget.notes|linebreaksbr }}</p>{% endif %}
+    <div class="budget-legend"><span class="recorded-figure">Blue: recorded figure</span><span>Black: calculated subtotal</span><span class="estimated-figure">Estimate: provisional figure</span><span class="unconfirmed-figure">Yellow: awaiting entry</span></div>
+    <section class="ledger-section budget-tab-panel" id="budget-income" role="tabpanel" aria-labelledby="tab-budget-income" tabindex="0" hidden>
+        <h3>Sources of Income</h3>
+        <div class="ledger-scroll"><table class="ledger">
+            <thead><tr><th>Code</th><th>Cost Centre</th><th>No.</th><th>Head</th><th>Line Item</th><th class="num">Amount ({{ currency.code }})</th><th>Basis / Notes</th></tr></thead>
+            <tbody>
+                {% for group in income_groups %}
+                <tr class="head-row"><td></td><td>Income ({{ group.name }})</td><td>{{ forloop.counter }}</td><td>{{ group.name }}</td><td></td><td class="num">{{ group.total|as_currency:currency }}</td><td>Calculated subtotal</td></tr>
+                {% for line in group.lines %}<tr><td class="line-code">{{ line.line_code }}</td><td>Income ({{ group.name }})</td><td></td><td></td><td class="line-label">{{ line.name }}</td><td class="num {% if line.figure_type == 'RECORDED' %}recorded-figure{% elif line.figure_type == 'UNCONFIRMED' %}unconfirmed-figure{% else %}estimated-figure{% endif %}">{% if line.figure_type == 'UNCONFIRMED' %}Unconfirmed{% else %}{{ line.planned_amount|as_currency:currency }}{% endif %}</td><td class="notes"><span class="basis">{{ line.get_figure_type_display }}</span>{{ line.notes }}</td></tr>{% endfor %}
+                {% empty %}<tr><td colspan="7">No funding sources entered yet. Use Edit Budget to add capital, financing and revenue.</td></tr>{% endfor %}
+                <tr class="subtotal"><td colspan="5">TOTAL INCOME</td><td class="num">{{ total_income_planned|as_currency:currency }}</td><td>Planned funding, not posted income</td></tr>
+            </tbody>
+        </table></div>
+    </section>
+    <h2 data-budget-cost-heading hidden style="font-size:1rem; margin:26px 0 8px;">Expenditure &mdash; by Enterprise / Cost Centre</h2>
+    {% for centre in centres %}
+    <section class="ledger-section budget-tab-panel" id="budget-centre-{{ forloop.counter }}" role="tabpanel" aria-labelledby="tab-budget-centre-{{ forloop.counter }}" tabindex="0" hidden>
+        <h3>{{ centre.name }}</h3>
+        <div class="ledger-scroll"><table class="ledger">
+            <thead><tr><th>Code</th><th>Cost Centre</th><th>No.</th><th>Head</th><th>Ref</th><th>Line Item</th><th class="num">Planned</th><th class="num">Actual</th><th class="num">Remaining</th><th>Basis / Notes</th>{% if can_edit %}<th class="no-print">Action</th>{% endif %}</tr></thead>
+            <tbody>
+                {% for head in centre.heads %}
+                <tr class="head-row"><td></td><td class="centre-name">{{ head.cost_name }}</td><td>{{ forloop.counter }}</td><td colspan="3">{{ head.name }}</td><td class="num">{{ head.planned|as_currency:currency }}</td><td class="num">{{ head.spent|as_currency:currency }}</td><td class="num {% if head.remaining < 0 %}balance-negative{% endif %}">{{ head.remaining|as_currency:currency }}</td><td>{% if head.register %}Subcode total{% else %}Calculated activity subtotal{% endif %}</td>{% if can_edit %}<td class="no-print">{% if head.register %}<a class="edit-line" href="{% url 'model_create' app='expenses' model='expense' %}?farm_profile={{ budget.farm_profile_id }}&amp;budget_item={{ head.register.pk }}" data-modal-url="{% url 'model_create' app='expenses' model='expense' %}?farm_profile={{ budget.farm_profile_id }}&amp;budget_item={{ head.register.pk }}&amp;next={% url 'budget_detail' budget.pk %}" data-modal-title="Record Expense">Record expense</a>{% endif %}</td>{% endif %}</tr>
+                {% for line in head.lines %}
+                <tr><td class="line-code">{{ line.line_code }}</td><td></td><td></td><td></td><td>{{ line.reference }}</td><td class="line-label">{{ line.line_name|default:line.category.name }}{% if line.crop_season %}<div class="budget-footnote">{{ line.crop_season }}</div>{% endif %}</td>
+                <td class="num {% if not line.schedule_line_id %}{% if line.figure_type == 'RECORDED' %}recorded-figure{% elif line.figure_type == 'UNCONFIRMED' %}unconfirmed-figure{% else %}estimated-figure{% endif %}{% endif %}">{% if line.schedule_line_id %}{% elif line.figure_type == 'UNCONFIRMED' %}Unconfirmed{% else %}{{ line.planned_amount|as_currency:currency }}{% endif %}</td><td class="num">{% if line.actual %}{{ line.actual|as_currency:currency }}{% endif %}</td><td class="num {% if line.balance < 0 %}balance-negative{% endif %}">{% if line.schedule_line_id %}{% else %}{{ line.balance|as_currency:currency }}{% endif %}</td><td class="notes">{% if not line.schedule_line_id %}<span class="basis">{{ line.get_figure_type_display }}</span>{% endif %}{{ line.notes }}</td>
+                {% if can_edit %}<td class="no-print">{% if line.pk %}<a class="edit-line" href="{% url 'model_create' app='expenses' model='expense' %}?farm_profile={{ budget.farm_profile_id }}&amp;budget_item={{ line.pk }}" data-modal-url="{% url 'model_create' app='expenses' model='expense' %}?farm_profile={{ budget.farm_profile_id }}&amp;budget_item={{ line.pk }}&amp;next={% url 'budget_detail' budget.pk %}" data-modal-title="Record Expense">Record expense</a>{% endif %}</td>{% endif %}</tr>
+                {% endfor %}{% endfor %}
+                <tr class="subtotal"><td colspan="6">Subtotal &mdash; {{ centre.name }}</td><td class="num">{{ centre.planned|as_currency:currency }}</td><td class="num">{{ centre.spent|as_currency:currency }}</td><td class="num">{{ centre.remaining|as_currency:currency }}</td><td></td>{% if can_edit %}<td class="no-print"></td>{% endif %}</tr>
+            </tbody>
+        </table></div>
+    </section>
+    {% empty %}<section class="budget-tab-panel" id="budget-expenditure-empty" role="tabpanel" aria-labelledby="tab-budget-expenditure-empty" tabindex="0" hidden><div class="budget-notice">No expenditure lines yet. Use Edit Budget to build the plan.</div></section>{% endfor %}
+</article>
+<details class="ledger-section budget-tab-panel" id="budget-actual" role="tabpanel" aria-labelledby="tab-budget-actual" tabindex="0" open hidden><summary style="cursor:pointer; font-weight:700; padding:12px;">Actual Expenditure Ledger ({{ expenses|length }} records)</summary><div class="ledger-scroll"><table class="ledger"><thead><tr><th>Date</th><th>Line Code</th><th>Budget Code</th><th>Vendor</th><th class="num">Amount</th></tr></thead><tbody>{% for expense in expenses %}<tr><td>{{ expense.date }}</td><td>{{ expense.budget_item.line_code }}</td><td>{{ expense.category.name }}</td><td>{{ expense.vendor }}</td><td class="num">{{ expense.amount|as_currency:currency }}</td></tr>{% empty %}<tr><td colspan="5">No actual expenses posted.</td></tr>{% endfor %}</tbody></table></div></details>
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    const paper = document.getElementById('budget-table-paper');
+    const costHeading = document.querySelector('[data-budget-cost-heading]');
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        paper.hidden = target === 'budget-overview' || target === 'budget-actual';
+        costHeading.hidden = !target.startsWith('budget-centre-') && target !== 'budget-expenditure-empty';
+        if (target === 'budget-actual') document.getElementById(target).open = true;
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
+{% endblock %}

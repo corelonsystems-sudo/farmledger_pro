@@ -1,0 +1,10 @@
+<div class="budget-line">
+    {% for field in line_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
+    {% if line_form.non_field_errors %}<div class="planner-alert">{{ line_form.non_field_errors }}</div>{% endif %}
+    {% for field in line_form.visible_fields %}
+    <div class="field-{{ field.name }}">
+        <label for="{{ field.id_for_label }}">{% if field.name == 'DELETE' %}Remove this line{% else %}{{ field.label }}{% endif %}</label>
+        {{ field }}{{ field.errors }}
+    </div>
+    {% endfor %}
+</div>

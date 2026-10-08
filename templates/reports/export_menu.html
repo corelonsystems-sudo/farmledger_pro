@@ -1,0 +1,33 @@
+<style>
+    .export-menu { position: relative; }
+    .export-menu summary { list-style: none; cursor: pointer; }
+    .export-menu summary::-webkit-details-marker { display: none; }
+    .export-menu summary svg { flex-shrink: 0; }
+    .export-links {
+        position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+        background: #fff; border: 1px solid var(--border); border-radius: 10px;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14); min-width: 150px;
+        overflow: hidden; padding: 4px 0;
+    }
+    .export-links a { display: block; padding: 8px 14px; font-size: 0.78rem; color: var(--text); text-decoration: none; }
+    .export-links a:hover { background: #f1f5f4; }
+</style>
+<details class="export-menu">
+    <summary class="btn btn-secondary">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <div class="export-links">
+        <a href="?export=csv{% if report_workspace %}&amp;section={{ report_section }}{% endif %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% if show_sales_filters %}&amp;crop={{ crop }}&amp;season={{ season }}&amp;year={{ year }}{% endif %}{% if export_query %}&amp;{{ export_query }}{% endif %}">CSV (.csv)</a>
+        <a href="?export=xlsx{% if report_workspace %}&amp;section={{ report_section }}{% endif %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% if show_sales_filters %}&amp;crop={{ crop }}&amp;season={{ season }}&amp;year={{ year }}{% endif %}{% if export_query %}&amp;{{ export_query }}{% endif %}">Excel (.xlsx)</a>
+        <a href="?export=pdf{% if report_workspace %}&amp;section={{ report_section }}{% endif %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% if show_sales_filters %}&amp;crop={{ crop }}&amp;season={{ season }}&amp;year={{ year }}{% endif %}{% if export_query %}&amp;{{ export_query }}{% endif %}">PDF (.pdf)</a>
+    </div>
+</details>
+<script>
+document.addEventListener('click', function (e) {
+    document.querySelectorAll('.export-menu[open]').forEach(function (d) {
+        if (!d.contains(e.target)) { d.removeAttribute('open'); }
+    });
+});
+</script>

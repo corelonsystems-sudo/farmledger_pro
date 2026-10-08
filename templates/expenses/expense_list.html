@@ -1,0 +1,210 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Expenses - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}Expenses{% endblock %}
+{% block nav_expenses %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>Expenses</h2>
+        <p>Every expense is linked to a budget item — track spending, vendors, and reconciliation.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Expense">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Expense
+        </button>
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_amount|as_currency:currency }}</div>
+            <div class="kpi-label">Total Amount</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.total_count }}</div>
+            <div class="kpi-label">Records</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.pending_count }}</div>
+            <div class="kpi-label">Pending</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ stats.reconciled_count }}</div>
+            <div class="kpi-label">Reconciled</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters.date_from or filters.date_to or filters.category or filters.payment_method or filters.crop_season or filters.field or filters.status or q %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters.date_from or filters.date_to or filters.category or filters.payment_method or filters.crop_season or filters.field or filters.status or q %}<span class="active-count">Active</span>{% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="q">Search</label>
+            <input type="text" name="q" id="q" value="{{ q }}" placeholder="Vendor, code, notes...">
+        </div>
+        <div class="form-group">
+            <label for="date_from">Date From</label>
+            <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+        </div>
+        <div class="form-group">
+            <label for="date_to">Date To</label>
+            <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+        </div>
+        <div class="form-group">
+            <label for="category">Budget Code</label>
+            <select name="category" id="category">
+                <option value="">All Codes</option>
+                {% for cat in categories %}
+                <option value="{{ cat.pk }}" {% if filters.category == cat.pk|stringformat:"i" %}selected{% endif %}>{{ cat.code }} — {{ cat.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="payment_method">Payment</label>
+            <select name="payment_method" id="payment_method">
+                <option value="">All Methods</option>
+                {% for value, label in payment_methods %}
+                <option value="{{ value }}" {% if filters.payment_method == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="crop_season">Crop Season</label>
+            <select name="crop_season" id="crop_season">
+                <option value="">All Seasons</option>
+                {% for s in seasons %}
+                <option value="{{ s.pk }}" {% if filters.crop_season == s.pk|stringformat:"i" %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="field">Field</label>
+            <select name="field" id="field">
+                <option value="">All Fields</option>
+                {% for f in fields %}
+                <option value="{{ f.pk }}" {% if filters.field == f.pk|stringformat:"i" %}selected{% endif %}>{{ f.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="status">Status</label>
+            <select name="status" id="status">
+                <option value="">All Statuses</option>
+                {% for value, label in statuses %}
+                <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Expense Records</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} record{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if expenses %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Budget Code</th>
+                    <th>Vendor</th>
+                    <th>Crop Season</th>
+                    <th>Field</th>
+                    <th>Payment</th>
+                    <th class="num">Amount</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for expense in expenses %}
+                <tr>
+                    <td>{{ expense.date }}</td>
+                    <td>
+                        <a class="link" href="{% url 'budget_code_detail' expense.category.pk %}">{% if expense.category.code %}{{ expense.category.code }} — {% endif %}{{ expense.category.name }}</a>
+                    </td>
+                    <td>{{ expense.vendor|default:"-" }}</td>
+                    <td>{{ expense.crop_season|default:"-" }}</td>
+                    <td>{{ expense.field|default:"-" }}</td>
+                    <td>{{ expense.get_payment_method_display }}</td>
+                    <td class="num amount">{{ expense.amount|as_currency:currency }}</td>
+                    <td>{% if expense.reconciliation_status == 'FLAGGED' %}<span class="cell-red">{{ expense.get_reconciliation_status_display }}</span>{% else %}{{ expense.get_reconciliation_status_display }}{% endif %}</td>
+                    <td>
+                        <div class="row-actions">
+                            <a class="link" data-modal-url="{% url 'model_update' app=app model=model pk=expense.pk %}" data-modal-title="Edit Expense" href="javascript:void(0)">Edit</a>
+                            <a class="link cell-red" data-modal-url="{% url 'model_delete' app=app model=model pk=expense.pk %}" data-modal-title="Delete Expense" href="javascript:void(0)">Delete</a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        <p>No expenses found</p>
+        <span>Try adjusting your filters, or record a new expense.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

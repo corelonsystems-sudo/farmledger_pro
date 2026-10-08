@@ -1,0 +1,228 @@
+{% extends report_base_template|default:'dashboard/base.html' %}
+{% load currency_tags %}
+
+{% block title %}Livestock Report - FarmLedger Pro{% endblock %}
+{% block nav_report_livestock %}active{% endblock %}
+{% block breadcrumbs %}Reports / Livestock{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "reports/report_styles.html" %}
+{% endblock %}
+
+{% block content %}
+{% include "reports/section_header.html" with title="Livestock Report" subtitle="Herd, flock, production and animal health summary." eyebrow="Livestock report" %}
+
+{% include "reports/period_filter.html" %}
+
+<div class="hero-strip">
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 7l-5 5v8h12v-8l-5-5"/><path d="M11 7V3h2v4"/></svg></div>
+        <div>
+            <div class="h-value">{{ total_animals }}</div>
+            <div class="h-label">Animals</div>
+            <div class="h-sub">{{ active_groups }} active groups</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8 2 6 6 6 10c0 2 1 3 2 4v6h8v-6c1-1 2-2 2-4 0-4-2-8-6-8z"/></svg></div>
+        <div>
+            <div class="h-value">{{ total_birds }}</div>
+            <div class="h-label">Poultry Birds</div>
+            <div class="h-sub">{{ batches|length }} batches</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2h8l4 8v10a2 2 0 01-2 2H6a2 2 0 01-2-2V10l4-8z"/><path d="M4 10h16"/></svg></div>
+        <div>
+            <div class="h-value">{{ milk_total }} L</div>
+            <div class="h-label">Milk Produced</div>
+            <div class="h-sub">{{ milk_revenue|as_currency:currency }} revenue</div>
+        </div>
+    </div>
+    <div class="hero-stat">
+        <div class="h-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg></div>
+        <div>
+            <div class="h-value">{{ eggs_total }}</div>
+            <div class="h-label">Eggs Collected</div>
+            <div class="h-sub">{{ eggs_damaged }} damaged</div>
+        </div>
+    </div>
+</div>
+
+<div class="ops-row">
+    <div class="ops-chip">
+        <div class="o-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div><div class="o-value">{{ feed_cost|as_currency:currency }}</div><div class="o-label">Feed Cost ({{ feed_kg }} kg)</div></div>
+    </div>
+    <div class="ops-chip">
+        <div class="o-icon" style="background:#fef2f2; color:#b91c1c;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4M12 16h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg></div>
+        <div><div class="o-value">{{ health_cost|as_currency:currency }}</div><div class="o-label">Health Cost ({{ health_count }} records)</div></div>
+    </div>
+</div>
+
+<div class="report-grid">
+    <!-- Milk production chart -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Milk Production</h3>
+            <span class="row-count">{{ milk_monthly|length }} months</span>
+        </div>
+        {% if milk_monthly %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for m in milk_monthly %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ m.pct }}" title="{{ m.label }}: {{ m.value }} L"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for m in milk_monthly %}<span>{{ m.label }}</span>{% endfor %}
+            </div>
+            <div class="chart-legend"><span><span class="dot in"></span>Liters</span></div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2h8l4 8v10a2 2 0 01-2 2H6a2 2 0 01-2-2V10l4-8z"/><path d="M4 10h16"/></svg>
+            <p>No milk records</p>
+            <span>Dairy production will appear here.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Egg production chart -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Egg Production</h3>
+            <span class="row-count">{{ eggs_monthly|length }} months</span>
+        </div>
+        {% if eggs_monthly %}
+        <div class="chart-wrap">
+            <div class="chart">
+                {% for m in eggs_monthly %}
+                <div class="chart-group">
+                    <div class="bars">
+                        <span class="bar solo" data-height="{{ m.pct }}" title="{{ m.label }}: {{ m.value }} eggs"></span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="chart-x">
+                {% for m in eggs_monthly %}<span>{{ m.label }}</span>{% endfor %}
+            </div>
+            <div class="chart-legend"><span><span class="dot in"></span>Eggs collected</span></div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/></svg>
+            <p>No egg records</p>
+            <span>Egg production will appear here.</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="report-grid">
+    <!-- Animal groups -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Animal Groups</h3>
+            <a class="link" href="{% url 'model_list' app='livestock' model='animalgroup' %}">All groups &rarr;</a>
+        </div>
+        {% if groups %}
+        <table class="list-table" data-no-filter>
+            <thead>
+                <tr>
+                    <th>Group</th>
+                    <th>Species</th>
+                    <th class="num">Count</th>
+                    <th>Purpose</th>
+                    <th>Field</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in groups %}
+                <tr>
+                    <td style="font-weight:600;">{{ g.name }}{% if not g.is_active %} <span class="muted">(inactive)</span>{% endif %}</td>
+                    <td>{{ g.species.name|default:"-" }}</td>
+                    <td class="num">{{ g.count }}</td>
+                    <td>{{ g.get_purpose_display }}</td>
+                    <td class="muted">{{ g.field.name|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 7l-5 5v8h12v-8l-5-5"/></svg>
+            <p>No animal groups</p>
+            <span>Create groups to track herds and flocks.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Health records donut -->
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Health Records</h3>
+            <span class="row-count">{{ health_count }} records</span>
+        </div>
+        {% if health_donut %}
+        {% include "reports/donut.html" with segments=health_donut center_num=health_count center_lbl="Records" %}
+        {% else %}
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 8v4M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg>
+            <p>No health records</p>
+            <span>Vaccinations and treatments will appear here.</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Poultry batches -->
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Poultry Batches</h3>
+        <a class="link" href="{% url 'model_list' app='livestock' model='poultrybatch' %}">All batches &rarr;</a>
+    </div>
+    {% if batches %}
+    <table class="list-table" data-no-filter>
+        <thead>
+            <tr>
+                <th>Batch</th>
+                <th>Type</th>
+                <th>Purpose</th>
+                <th class="num">Birds</th>
+                <th class="num">Mortality</th>
+                <th style="width: 160px;">Survival</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in batches %}
+            <tr>
+                <td style="font-weight:600;">{{ b.batch_name }}</td>
+                <td>{{ b.get_bird_type_display }}</td>
+                <td>{{ b.get_purpose_display }}</td>
+                <td class="num">{{ b.current_count }}</td>
+                <td class="num muted">{{ b.mortality_count }}</td>
+                <td>
+                    <div class="hbar crop"><span data-width="{{ b.survival_rate }}"></span></div>
+                </td>
+                <td class="muted">{{ b.get_status_display }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2C8 2 6 6 6 10c0 2 1 3 2 4v6h8v-6c1-1 2-2 2-4 0-4-2-8-6-8z"/></svg>
+        <p>No poultry batches</p>
+        <span>Batch performance will appear here.</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,249 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ source.name }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='income' model='incomesource' %}">Income Sources</a> &rsaquo; {{ source.name }}{% endblock %}
+{% block nav_income_sources %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .source-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .source-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .source-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; border:1px solid #d8e7dc; border-radius:14px; background:white; color:#1b4332; font-size:1.8rem; font-weight:700; }
+    .source-avatar img { width:100%; height:100%; object-fit:contain; padding:6px; border-radius:14px; }
+    .source-header-copy { min-width:0; }
+    .source-eyebrow { margin:0 0 7px; color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; }
+    .source-toolbar h1 { margin:0; color:white; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; overflow-wrap:anywhere; }
+    .source-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .source-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .source-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; background:rgba(255,255,255,.07); color:#eff7f1; font-size:.68rem; }
+    .source-header-shared { padding:5px 10px; border-radius:6px; background:#d5f4df; color:#14532d; font-size:.68rem; font-weight:700; }
+    .source-toolbar .actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; max-width:360px; }
+    .source-toolbar .btn-primary { border:1px solid white; background:white; color:#1b4332; }
+    .source-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .source-toolbar .btn-secondary { border:1px solid rgba(255,255,255,.35); background:rgba(255,255,255,.08); color:white; }
+    .source-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .source-back { width:100%; margin-bottom:2px; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; }
+    .source-back:hover { color:white; text-decoration:underline; }
+    @media(max-width:1000px) { .source-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .source-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .source-back { text-align:left; } }
+    @media(max-width:600px) { .source-toolbar { padding:18px; } .source-header-identity { gap:12px; align-items:flex-start; } .source-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
+    @media print { .sidebar,.topbar,.source-toolbar .actions,.filter-panel { display:none!important; } .main { margin:0; padding:0; } .source-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; } .source-toolbar h1,.source-eyebrow,.source-header-subtitle,.source-header-tag { color:#1b4332; } .source-header-tag { background:white; border-color:#ccd5d0; } }
+    .budget-header { grid-template-columns: 1fr 1fr; }
+    @media (max-width: 700px) { .budget-header { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="source-toolbar" aria-labelledby="source-page-title">
+    <div class="source-header-identity">
+        <div class="source-avatar" aria-hidden="true">{% if header_farm.logo %}<img src="{{ header_farm.logo.url }}" alt="">{% else %}{{ source.name|first|upper }}{% endif %}</div>
+        <div class="source-header-copy">
+            <p class="source-eyebrow">Income Source</p>
+            <h1 id="source-page-title">{{ source.name }}</h1>
+            <p class="source-header-subtitle">{{ source.get_schedule_f_line_display }}</p>
+            <div class="source-header-meta">
+                <span class="source-header-shared">Shared source</span>
+                {% if source.code %}<span class="source-header-tag">{{ source.code }}</span>{% endif %}
+                <span class="source-header-tag">SRC-{{ source.pk|stringformat:"05d" }}</span>
+                <span class="source-header-tag">{{ total_count }} income record{{ total_count|pluralize }}</span>
+                <span class="source-header-tag">{{ currency.code }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="source-back" href="{% url 'model_list' app='income' model='incomesource' %}">&larr; Back to Income Sources</a>
+        {% if can_record_income %}<a class="btn btn-primary" href="{% url 'model_create' app='income' model='income' %}?source={{ source.pk }}" data-modal-url="{% url 'model_create' app='income' model='income' %}?source={{ source.pk }}{% if header_farm %}&amp;farm_profile={{ header_farm.pk }}{% endif %}&amp;next={{ request.path }}" data-modal-title="New Income">+ Record Income</a>{% endif %}
+        {% if can_edit_source %}<a class="btn btn-secondary" href="{% url 'model_update' app='income' model='incomesource' pk=source.pk %}" data-modal-url="{% url 'model_update' app='income' model='incomesource' pk=source.pk %}?next={{ request.path }}" data-modal-title="Edit Income Source">Edit Source</a>{% endif %}
+        <button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>
+    </div>
+</header>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ total_count }}</div>
+            <div class="kpi-label">Records</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ total_amount|as_currency:currency }}</div>
+            <div class="kpi-label">Total Amount</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ pending_count }}</div>
+            <div class="kpi-label">Pending</div>
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>
+        </div>
+        <div>
+            <div class="kpi-value">{{ reconciled_count }}</div>
+            <div class="kpi-label">Reconciled</div>
+        </div>
+    </div>
+</div>
+
+<div class='budget-header'>
+    <div class="summary-card">
+        <h3>Source Info</h3>
+        <div class="summary-row">
+            <span class="label">Code</span>
+            <span class="value">{{ source.code|default:"—" }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Name</span>
+            <span class="value">{{ source.name }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Schedule F Line</span>
+            <span class="value">{{ source.get_schedule_f_line_display }}</span>
+        </div>
+        {% if source.description %}
+        <div class="summary-row">
+            <span class="label">Description</span>
+            <span class="value" style="font-weight:400; font-size:0.8rem;">{{ source.description }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="summary-card">
+        <h3>Income Summary</h3>
+        <div class="summary-row">
+            <span class="label">Total Records</span>
+            <span class="value">{{ total_count }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Total Amount</span>
+            <span class="value green">{{ total_amount|as_currency:currency }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Pending</span>
+            <span class="value">{{ pending_count }}</span>
+        </div>
+        <div class="summary-row">
+            <span class="label">Reconciled</span>
+            <span class="value">{{ reconciled_count }}</span>
+        </div>
+    </div>
+</div>
+
+<details class="filter-panel" {% if filters.status or filters.customer or filters.crop_season or filters.field %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filter Income Records
+        {% if filters.status or filters.customer or filters.crop_season or filters.field %}<span class="active-count">Active</span>{% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        <div class="form-group">
+            <label for="status">Status</label>
+            <select name="status" id="status">
+                <option value="">All Statuses</option>
+                <option value="PENDING" {% if filters.status == 'PENDING' %}selected{% endif %}>Pending</option>
+                <option value="RECONCILED" {% if filters.status == 'RECONCILED' %}selected{% endif %}>Reconciled</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="customer">Customer</label>
+            <input type="text" name="customer" id="customer" value="{{ filters.customer }}" placeholder="Search customer...">
+        </div>
+        <div class="form-group">
+            <label for="crop_season">Crop Season</label>
+            <select name="crop_season" id="crop_season">
+                <option value="">All Seasons</option>
+                {% for season in crop_seasons %}
+                <option value="{{ season.pk }}" {% if filters.crop_season == season.pk|stringformat:"s" %}selected{% endif %}>{{ season }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="field">Field</label>
+            <select name="field" id="field">
+                <option value="">All Fields</option>
+                {% for field in fields %}
+                <option value="{{ field.pk }}" {% if filters.field == field.pk|stringformat:"s" %}selected{% endif %}>{{ field }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="{% url 'income_source_detail' source.pk %}" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class='table-card'>
+    <div class="table-card-head">
+        <h3>Income Records</h3>
+        <span class="row-count">{{ total_count }} record{{ total_count|pluralize }}</span>
+    </div>
+    {% if recent_incomes %}
+    <div style="overflow-x:auto;">
+    <table class="list-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Crop Season</th>
+                <th>Field</th>
+                <th class="num">Amount</th>
+                <th>Status</th>
+                <th style="text-align:right;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for income in recent_incomes %}
+            <tr>
+                <td>{{ income.date }}</td>
+                <td>
+                    {{ income.customer|default:"-" }}
+                    {% if income.sale_id %}<div class="sub-text">via <a class="link" href="{% url 'sale_detail' income.sale_id %}">Sale #{{ income.sale_id }}</a></div>{% endif %}
+                </td>
+                <td>{{ income.crop_season|default:"-" }}</td>
+                <td>{{ income.field|default:"-" }}</td>
+                <td class="num amount">{{ income.amount|as_currency:currency }}</td>
+                <td>{% if income.reconciliation_status == 'FLAGGED' %}<span class="cell-red">{{ income.get_reconciliation_status_display }}</span>{% else %}{{ income.get_reconciliation_status_display }}{% endif %}</td>
+                <td>
+                    <div class="row-actions">
+                        <a class="link" data-modal-url="{% url 'model_update' app='income' model='income' pk=income.pk %}" data-modal-title="Edit Income" href="javascript:void(0)">Edit</a>
+                        <a class="link cell-red" data-modal-url="{% url 'model_delete' app='income' model='income' pk=income.pk %}" data-modal-title="Delete Income" href="javascript:void(0)">Delete</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class='totals-row'>
+                <td colspan="4">Filtered Total</td>
+                <td class="num">{{ total_amount|as_currency:currency }}</td>
+                <td colspan="2"></td>
+            </tr>
+        </tfoot>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        <p>No income records for this source{% if filters.status or filters.customer or filters.crop_season or filters.field %} matching the filters{% endif %}</p>
+        <span>Sales linked to this source create income records automatically.</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
