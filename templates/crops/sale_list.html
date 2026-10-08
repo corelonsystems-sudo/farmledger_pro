@@ -174,7 +174,7 @@
                 <tr>
                     <td style="white-space:nowrap;">{{ sale.sale_date }}</td>
                     <td>{% if sale.harvest %}{{ sale.harvest.crop_season.crop.name }}{% elif sale.inventory_item %}{{ sale.inventory_item.name }}{% else %}-{% endif %}</td>
-                    <td>{{ sale.buyer|default:"-" }}{% if sale.payment_status != 'PAID' %} <span class="waste-tag">{{ sale.get_payment_status_display }}</span>{% endif %}</td>
+                    <td>{{ sale.buyer|default:"-" }}{% if sale.payment_status != 'PAID' %} <span class="waste-tag">{{ sale.get_payment_status_display }}{% if sale.receivable %}: {{ sale.receivable|as_currency:currency }}{% endif %}</span>{% endif %}</td>
                     {% if is_waste %}
                     <td><span class="waste-tag">{{ sale.processing_stage.waste_name|default:sale.harvest.waste_name|default:"-" }}</span></td>
                     {% endif %}

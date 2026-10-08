@@ -29,7 +29,7 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
-    list_display = ('budget_item', 'schedule_line', 'amount', 'date', 'vendor', 'farm_profile')
+    list_display = ('budget_item', 'schedule_line', 'processing_stage', 'amount', 'date', 'vendor', 'farm_profile')
     list_filter = ('budget_item', 'date', 'farm_profile')
     search_fields = ('vendor', 'notes', 'budget_item__category__name', 'offline_uuid')
     date_hierarchy = 'date'

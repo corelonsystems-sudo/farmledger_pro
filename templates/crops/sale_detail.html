@@ -93,6 +93,16 @@
                 <td class="total">Total</td>
                 <td class="num total">{{ currency.symbol|default:"$" }} {{ sale.total_amount|floatformat:2 }}</td>
             </tr>
+            {% if sale.payment_status != 'PAID' %}
+            <tr>
+                <td>Amount received</td>
+                <td class="num">{{ currency.symbol|default:"$" }} {{ sale.amount_received|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td class="total">Balance due</td>
+                <td class="num total">{{ currency.symbol|default:"$" }} {{ sale.receivable|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
         </tbody>
     </table>
     <div class="notes">

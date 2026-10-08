@@ -643,6 +643,27 @@ def crop_season_detail_view(request, pk):
 
 
 @login_required
+def customer_detail_view(request, pk):
+    from .models import Customer
+    customer = get_object_or_404(
+        scoped_queryset(Customer, request.user, Customer.objects.all()), pk=pk)
+    sales = list(
+        Sale.objects.filter(customer=customer)
+        .select_related('harvest__crop_season__crop', 'processing_stage', 'inventory_item')
+        .order_by('-sale_date'))
+    total_spend = sum((s.total_amount for s in sales), Decimal('0'))
+    outstanding = sum((s.receivable for s in sales), Decimal('0'))
+    last_sale = sales[0].sale_date if sales else None
+    return render(request, 'crops/customer_detail.html', {
+        'customer': customer,
+        'sales': sales,
+        'total_spend': total_spend,
+        'outstanding': outstanding,
+        'last_sale': last_sale,
+    })
+
+
+@login_required
 def sale_detail_view(request, pk):
     sale = get_object_or_404(
         scoped_queryset(

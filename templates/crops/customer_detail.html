@@ -1,0 +1,84 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ customer.name }} - Customer{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'model_list' app='crops' model='customer' %}">Customers</a> &rsaquo; {{ customer.name }}{% endblock %}
+{% block extra_head %}
+{% include "dashboard/detail_page_styles.html" %}
+{% endblock %}
+{% block content %}
+<div class='profile-header'>
+    <div class='profile-identity'>
+        <div class='avatar'>{% if customer.name %}{{ customer.name|first|upper }}{% else %}C{% endif %}</div>
+        <div class='profile-name'>
+            <h1>{{ customer.name }}</h1>
+            <div class='profile-meta'>
+                {{ customer.farm_profile.farm_name }}
+                {% if customer.phone %}&bull; {{ customer.phone }}{% endif %}
+                {% if customer.email %}&bull; {{ customer.email }}{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class='profile-actions'>
+        <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_update' app='crops' model='customer' pk=customer.pk %}?next={{ request.path }}" data-modal-title="Edit Customer">Edit</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='sale' %}?customer={{ customer.pk }}&next={{ request.path }}" data-modal-title="New Sale">New Sale</a>
+        <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_delete' app='crops' model='customer' pk=customer.pk %}" data-modal-title="Delete Customer">Delete</a>
+    </div>
+</div>
+
+<div class="budget-header">
+    <div class="summary-card">
+        <h3>Customer</h3>
+        <div class="summary-row"><span class="label">Farm</span><span class="value">{{ customer.farm_profile.farm_name }}</span></div>
+        <div class="summary-row"><span class="label">Phone</span><span class="value">{{ customer.phone|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Email</span><span class="value">{{ customer.email|default:"-" }}</span></div>
+        {% if customer.notes %}<div class="summary-row"><span class="label">Notes</span><span class="value">{{ customer.notes }}</span></div>{% endif %}
+    </div>
+    <div class="summary-card">
+        <h3>Purchase History</h3>
+        <div class="summary-row"><span class="label">Orders</span><span class="value">{{ sales|length }}</span></div>
+        <div class="summary-row"><span class="label">Total Purchases</span><span class="value green">{{ total_spend|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Outstanding</span><span class="value {% if outstanding > 0 %}red{% else %}green{% endif %}">{{ outstanding|as_currency:currency }}</span></div>
+        <div class="summary-row"><span class="label">Last Order</span><span class="value">{{ last_sale|default:"-" }}</span></div>
+    </div>
+</div>
+
+<div class="panel profile-card">
+    <div class="panel-head">
+        <h3>Sales History</h3>
+    </div>
+    {% if sales %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Item</th>
+                    <th class="num">Qty</th>
+                    <th class="num">Unit Price</th>
+                    <th class="num">Total</th>
+                    <th>Payment</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Receipt</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in sales %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ sale.sale_date }}</td>
+                    <td>{% if sale.harvest %}{{ sale.harvest.crop_season.crop.name }}{% if sale.processing_stage %} &rsaquo; {{ sale.processing_stage.name }}{% endif %}{% elif sale.inventory_item %}{{ sale.inventory_item.name }}{% else %}-{% endif %}{% if sale.is_waste %} <span class="waste-tag">waste</span>{% endif %}</td>
+                    <td class="num">{{ sale.quantity }} {{ sale.unit }}</td>
+                    <td class="num">{{ sale.unit_price|as_currency:currency }}</td>
+                    <td class="num amount">{{ sale.total_amount|as_currency:currency }}</td>
+                    <td style="white-space:nowrap;">{{ sale.get_payment_method_display }}</td>
+                    <td>{% if sale.payment_status == 'PAID' %}<span class="status-badge active">Paid</span>{% else %}<span class="waste-tag">{{ sale.get_payment_status_display }}: {{ sale.receivable|as_currency:currency }}</span>{% endif %}</td>
+                    <td style="text-align:right;"><a class="action-btn view" data-modal-url="{% url 'sale_detail' pk=sale.pk %}" data-modal-title="Sales Receipt" href="javascript:void(0)">View</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No purchases yet</p><span>Sales made to this customer will appear here.</span></div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -161,6 +161,10 @@ class CropSeason(models.Model):
         if errors:
             raise ValidationError(errors)
 
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     @property
     def yield_per_acre(self):
         if self.field_id and self.field.acreage:
@@ -318,6 +322,14 @@ class ProcessingStage(models.Model):
         max_digits=12, decimal_places=2, default=0,
         help_text='Additional value created at this stage.',
     )
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processing_stages',
+        help_text='Budget item this stage\'s cost posts to (so it counts in budget actuals).',
+    )
     start_date = models.DateField(null=True, blank=True, help_text='Date processing for this stage begins.')
     duration_days = models.PositiveIntegerField(default=0, blank=True, help_text='Number of days the stage is expected to take.')
     input_quantity = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True, help_text='Quantity of raw produce used in this stage.')
@@ -367,6 +379,12 @@ class ProcessingStage(models.Model):
         if (self.start_date and self.harvest_id and self.harvest.harvest_date
                 and self.start_date < self.harvest.harvest_date):
             errors['start_date'] = 'Processing cannot start before the harvest date.'
+        if self.budget_item_id and self.harvest_id:
+            season = self.harvest.crop_season
+            farm_id = season.field.farm_profile_id if season and season.field_id else None
+            item_farm = self.budget_item.budget.farm_profile_id
+            if farm_id and item_farm and farm_id != item_farm:
+                errors['budget_item'] = 'The budget item must belong to the same farm as this stage.'
         if self.harvest_id and self.input_quantity:
             # Stage input draws from the raw harvest (first stage) or the
             # previous stage's output, less whatever was already sold from
@@ -494,6 +512,10 @@ class Sale(models.Model):
         default=PaymentStatus.PAID,
         help_text='Track whether the buyer has paid, for receivables reporting.',
     )
+    amount_received = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        help_text='Amount collected from the buyer so far; the remainder is a receivable.',
+    )
     is_waste = models.BooleanField(
         default=False,
         help_text='Check if this sale is for waste material from the harvest or stage.',
@@ -518,6 +540,13 @@ class Sale(models.Model):
     def total_amount(self):
         return self.quantity * self.unit_price
 
+    @property
+    def receivable(self):
+        """Balance still owed on this sale."""
+        if self.payment_status == self.PaymentStatus.PAID:
+            return Decimal('0')
+        return max(self.total_amount - (self.amount_received or Decimal('0')), Decimal('0'))
+
     def clean(self):
         errors = {}
         if self.customer_id:
@@ -528,6 +557,17 @@ class Sale(models.Model):
             errors['quantity'] = 'Quantity must be greater than zero.'
         if self.unit_price is not None and self.unit_price < 0:
             errors['unit_price'] = 'Unit price cannot be negative.'
+        if self.amount_received is not None:
+            if self.amount_received < 0:
+                errors['amount_received'] = 'Amount received cannot be negative.'
+            elif (self.quantity is not None and self.unit_price is not None
+                    and self.amount_received > self.total_amount):
+                errors['amount_received'] = 'Amount received cannot exceed the sale total.'
+        if self.payment_status == self.PaymentStatus.UNPAID:
+            self.amount_received = Decimal('0')
+        elif (self.payment_status == self.PaymentStatus.PAID
+                and self.quantity is not None and self.unit_price is not None):
+            self.amount_received = self.total_amount
         if (self.sale_date and self.harvest_id and self.harvest.harvest_date
                 and self.sale_date < self.harvest.harvest_date):
             errors['sale_date'] = 'Sale date cannot be before the harvest date.'

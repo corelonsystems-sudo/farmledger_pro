@@ -118,6 +118,7 @@ def sync_processing_expense(stage):
             'farm_profile': farm_profile,
             'category': category,
             'crop_season': season,
+            'budget_item': stage.budget_item,
             'amount': stage.cost,
             'date': stage.end_date or stage.start_date or stage.harvest.harvest_date,
             'notes': f'Auto-generated from processing stage {stage.sequence}. {stage.name}',

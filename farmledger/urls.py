@@ -18,7 +18,7 @@ from labor.models import Worker, Task
 
 from accounts.views import PostOnlyLogoutView, set_currency_view
 from budgets.views import budget_detail_view, budget_item_add_view, budget_code_detail_view, budget_plan_edit_view
-from crops.views import crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view, waste_detail_view
+from crops.views import crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view, waste_detail_view, customer_detail_view
 from income.views import income_source_detail_view
 from .views import (
     model_list, model_create, model_update, model_delete, farm_settings,
@@ -89,6 +89,7 @@ urlpatterns = [
     path('seasons/<int:pk>/', crop_season_detail_view, name='crop_season_detail'),
     path('harvests/<int:pk>/', harvest_detail_view, name='harvest_detail'),
     path('sales/<int:pk>/', sale_detail_view, name='sale_detail'),
+    path('customers/<int:pk>/', customer_detail_view, name='customer_detail'),
     path('waste/<int:pk>/', waste_detail_view, name='waste_detail'),
     path('income-sources/<int:pk>/', income_source_detail_view, name='income_source_detail'),
     path('set-currency/', set_currency_view, name='set_currency'),

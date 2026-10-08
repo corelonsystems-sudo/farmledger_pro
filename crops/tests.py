@@ -113,13 +113,17 @@ class SalesReportLayoutTests(TestCase):
         farm = FarmProfile.objects.create(user=user, farm_name='Test farm')
         field = Field.objects.create(farm_profile=farm, name='North', acreage=Decimal('2'))
         self.seasons = []
-        for name, quantity, price, buyer, waste in (
+        for i, (name, quantity, price, buyer, waste) in enumerate((
             ('Coffee', '10', '10', 'Buyer A', False),
             ('Maize', '5', '10', 'Buyer B', False),
             ('Coffee', '5', '5', 'Buyer A', True),
-        ):
+        )):
             crop, _ = Crop.objects.get_or_create(name=name)
-            season = CropSeason.objects.create(field=field, crop=crop, planting_date=date(2025, 1, 1))
+            # Each season needs its own field: overlapping non-perennial
+            # seasons on one field are now rejected by validation.
+            season_field = field if i == 0 else Field.objects.create(
+                farm_profile=farm, name=f'North-{i}', acreage=Decimal('2'))
+            season = CropSeason.objects.create(field=season_field, crop=crop, planting_date=date(2025, 1, 1))
             self.seasons.append(season)
             harvest = HarvestRecord.objects.create(
                 crop_season=season, harvest_date=date(2025, 2, 1), quantity=Decimal('20'),
@@ -250,9 +254,12 @@ class SalesReportLayoutTests(TestCase):
         self.assertContains(single_month, 'class="sales-line sales-line-combined"', count=1)
 
     def test_year_selection_filters_report_and_keeps_twelve_months(self):
+        # Sequential rotation on the same field is fine once the earlier
+        # season has an end date before the next planting.
         season_2024 = CropSeason.objects.create(
             field=self.seasons[0].field, crop=self.seasons[0].crop,
-            planting_date=date(2024, 1, 1))
+            planting_date=date(2024, 1, 1),
+            expected_harvest_date=date(2024, 12, 31))
         harvest_2024 = HarvestRecord.objects.create(
             crop_season=season_2024, harvest_date=date(2024, 5, 1),
             quantity=Decimal('10'))
@@ -346,8 +353,11 @@ class SaleConsistencyTests(TestCase):
                 quantity=Decimal('5'), unit_price=Decimal('1'), is_waste=True)
 
     def test_processing_stage_must_belong_to_sale_harvest(self):
+        other_field = Field.objects.create(
+            farm_profile=self.season.field.farm_profile, name='South',
+            acreage=Decimal('1'))
         other_season = CropSeason.objects.create(
-            field=self.season.field, crop=self.crop, planting_date=date(2025, 1, 2))
+            field=other_field, crop=self.crop, planting_date=date(2025, 1, 2))
         other_harvest = HarvestRecord.objects.create(
             crop_season=other_season, harvest_date=date(2025, 6, 2),
             quantity=Decimal('40'))
@@ -636,3 +646,107 @@ class CropIntegrityTests(TestCase):
         expense.schedule_line = ScheduleLine.objects.create(
             code='pest', name='Pest control', subcode=sub_b)
         expense.full_clean()  # no error now
+
+    # -- Amount received / receivables -----------------------------------------
+
+    def test_amount_received_bounds_are_validated(self):
+        with self.assertRaises(ValidationError):
+            Sale.objects.create(
+                harvest=self.harvest, sale_date=date(2025, 7, 1),
+                quantity=Decimal('5'), unit='kg', unit_price=Decimal('4'),
+                payment_status='PARTIAL', amount_received=Decimal('-1'))
+        with self.assertRaises(ValidationError):
+            Sale.objects.create(
+                harvest=self.harvest, sale_date=date(2025, 7, 1),
+                quantity=Decimal('5'), unit='kg', unit_price=Decimal('4'),
+                payment_status='PARTIAL', amount_received=Decimal('21'))
+
+    def test_payment_status_keeps_amount_received_consistent(self):
+        paid = Sale.objects.create(
+            harvest=self.harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('5'), unit='kg', unit_price=Decimal('4'),
+            payment_status='PAID')
+        self.assertEqual(paid.amount_received, Decimal('20'))
+        self.assertEqual(paid.receivable, Decimal('0'))
+
+        unpaid = Sale.objects.create(
+            harvest=self.harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('5'), unit='kg', unit_price=Decimal('4'),
+            payment_status='UNPAID', amount_received=Decimal('10'))
+        self.assertEqual(unpaid.amount_received, Decimal('0'))
+        self.assertEqual(unpaid.receivable, Decimal('20'))
+
+    def test_partial_sale_receivable_is_the_balance(self):
+        self.client.force_login(self.user)
+        sale = Sale.objects.create(
+            harvest=self.harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('10'), unit='kg', unit_price=Decimal('5'),
+            payment_status='PARTIAL', amount_received=Decimal('30'))
+        self.assertEqual(sale.receivable, Decimal('20'))
+        response = self.client.get(reverse('report_sales'))
+        self.assertEqual(response.context['receivables'], Decimal('20'))
+        self.assertEqual(response.context['receivable_count'], 1)
+
+    # -- Overlap enforced on save() --------------------------------------------
+
+    def test_overlap_rejected_on_direct_create(self):
+        with self.assertRaises(ValidationError):
+            CropSeason.objects.create(
+                field=self.field, crop=self.crop,
+                planting_date=date(2025, 3, 1))
+
+    # -- Stage budget item -> expense ------------------------------------------
+
+    def test_stage_budget_item_flows_into_generated_expense(self):
+        from budgets.models import Budget, BudgetItem
+        from expenses.models import BudgetSubCode, Category, Expense
+        category = Category.objects.create(name='Processing ops', code='PRO')
+        subcode = BudgetSubCode.objects.create(
+            category=category, code='PRO-A', name='Milling')
+        budget = Budget.objects.create(name='Plan', farm_profile=self.farm)
+        item = BudgetItem.objects.create(
+            budget=budget, category=category, subcode=subcode,
+            planned_amount=Decimal('1000'))
+        stage = ProcessingStage.objects.create(
+            harvest=self.harvest, name='Milling', sequence=1,
+            input_quantity=Decimal('50'), cost=Decimal('200'),
+            budget_item=item)
+        expense = Expense.objects.get(processing_stage=stage)
+        self.assertEqual(expense.budget_item, item)
+
+    def test_stage_budget_item_must_match_stage_farm(self):
+        from budgets.models import Budget, BudgetItem
+        from expenses.models import Category
+        other_farm = FarmProfile.objects.create(
+            user=User.objects.create_user(username='other', password='pw'),
+            farm_name='Other farm')
+        category = Category.objects.create(name='Ops', code='OPS')
+        budget = Budget.objects.create(name='Plan', farm_profile=other_farm)
+        item = BudgetItem.objects.create(
+            budget=budget, category=category, planned_amount=Decimal('10'))
+        with self.assertRaises(ValidationError):
+            ProcessingStage.objects.create(
+                harvest=self.harvest, name='Milling', sequence=1,
+                input_quantity=Decimal('10'), budget_item=item)
+
+    # -- Customer history --------------------------------------------------------
+
+    def test_customer_history_view(self):
+        from crops.models import Customer
+        self.client.force_login(self.user)
+        customer = Customer.objects.create(
+            farm_profile=self.farm, name='Kampala Traders')
+        Sale.objects.create(
+            harvest=self.harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('5'), unit='kg', unit_price=Decimal('4'),
+            customer=customer, payment_status='PARTIAL',
+            amount_received=Decimal('5'))
+        response = self.client.get(reverse('customer_detail', args=[customer.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['total_spend'], Decimal('20'))
+        self.assertEqual(response.context['outstanding'], Decimal('15'))
+        other = User.objects.create_user(username='outsider2', password='pw')
+        self.client.force_login(other)
+        self.assertEqual(
+            self.client.get(
+                reverse('customer_detail', args=[customer.pk])).status_code, 404)

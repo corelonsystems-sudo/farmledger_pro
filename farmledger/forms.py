@@ -276,7 +276,7 @@ class ProcessingStageForm(forms.ModelForm):
     class Meta:
         model = ProcessingStage
         fields = ['harvest', 'sequence', 'name', 'start_date', 'duration_days', 'cost',
-                  'added_value', 'input_quantity', 'output_quantity', 'output_unit',
+                  'added_value', 'budget_item', 'input_quantity', 'output_quantity', 'output_unit',
                   'waste_name', 'waste_quantity', 'waste_value', 'notes']
         widgets = {
             'name': forms.TextInput(attrs={'placeholder': 'e.g. Drying, Hulling, Packaging'}),
@@ -292,6 +292,12 @@ class ProcessingStageForm(forms.ModelForm):
             'waste_quantity': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'waste_value': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+        }
+        help_texts = {
+            'budget_item': "Optional. When set, this stage's cost posts to this budget item so it counts in budget actuals.",
         }
 
 
@@ -428,7 +434,7 @@ class SaleForm(forms.ModelForm):
     class Meta:
         model = Sale
         fields = ['harvest', 'processing_stage', 'inventory_item', 'is_waste', 'sale_date', 'quantity', 'unit',
-                  'unit_price', 'buyer', 'customer', 'payment_method', 'payment_status', 'notes']
+                  'unit_price', 'buyer', 'customer', 'payment_method', 'payment_status', 'amount_received', 'notes']
         widgets = {
             'processing_stage': ProcessingStageSelect(),
             'customer': forms.Select(),
@@ -438,7 +444,19 @@ class SaleForm(forms.ModelForm):
             'unit': forms.TextInput(attrs={'placeholder': 'kg, lbs, tons...'}),
             'unit_price': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'buyer': forms.TextInput(attrs={'placeholder': 'Buyer name'}),
+            'amount_received': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+        labels = {
+            'harvest': 'Crop source (harvest)',
+            'inventory_item': 'Inventory item',
+            'amount_received': 'Amount received so far',
+        }
+        help_texts = {
+            'harvest': 'Pick the harvest for crop produce sales; leave empty for an inventory-item sale.',
+            'inventory_item': 'For general stock sales; pick this instead of a harvest.',
+            'payment_status': 'Unpaid or partially paid sales count as receivables.',
+            'amount_received': 'For partially paid sales; must be less than the sale total.',
         }
 
 

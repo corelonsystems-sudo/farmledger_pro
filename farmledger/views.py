@@ -33,6 +33,7 @@ DETAIL_URL_NAMES = {
     ('budgets', 'budget'): 'budget_detail',
     ('expenses', 'category'): 'budget_code_detail',
     ('income', 'incomesource'): 'income_source_detail',
+    ('crops', 'customer'): 'customer_detail',
 }
 
 # Override generic dashboard list columns for specific models.
@@ -1353,8 +1354,222 @@ def _expense_list(request, app, model):
     return render(request, 'expenses/expense_list.html', context)
 
 
+def _field_list(request, app, model):
+    from fields.models import Field
+
+    q = request.GET.get('q', '')
+    soil = request.GET.get('soil', '')
+    status = request.GET.get('status', '')
+
+    queryset = scoped_queryset(Field, request.user, Field.objects.annotate(
+        season_count=Count('seasons', distinct=True),
+        parcel_count=Count('parcels', distinct=True),
+    )).order_by('name')
+
+    if q:
+        queryset = queryset.filter(name__icontains=q)
+    if soil:
+        queryset = queryset.filter(soil_type=soil)
+    if status == '1':
+        queryset = queryset.filter(is_active=True)
+    elif status == '0':
+        queryset = queryset.filter(is_active=False)
+
+    stats = {
+        'total_count': queryset.count(),
+        'total_acreage': queryset.aggregate(
+            t=Coalesce(Sum('acreage'), 0, output_field=DecimalField()))['t'],
+        'active': queryset.filter(is_active=True).count(),
+        'in_use': queryset.filter(season_count__gt=0).count(),
+    }
+
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+
+    context = {
+        'app': app,
+        'model': model,
+        'model_name': 'Fields',
+        'fields': page_obj,
+        'page_obj': page_obj,
+        'q': q,
+        'filters': {'soil': soil, 'status': status},
+        'soil_types': Field.SoilType.choices,
+        'query_string': query_params.urlencode(),
+        'urls': _crud_urls(app, model),
+        'stats': stats,
+    }
+    return render(request, 'fields/field_list.html', context)
+
+
+def _equipment_list(request, app, model):
+    from equipment.models import Equipment
+
+    q = request.GET.get('q', '')
+    eq_type = request.GET.get('type', '')
+    status = request.GET.get('status', '')
+
+    queryset = scoped_queryset(Equipment, request.user, Equipment.objects.annotate(
+        maintenance_total=Coalesce(Sum('maintenance_logs__cost'), 0, output_field=DecimalField()),
+        usage_hours=Coalesce(Sum('usage_records__hours'), 0, output_field=DecimalField()),
+    )).order_by('name')
+
+    if q:
+        queryset = queryset.filter(name__icontains=q)
+    if eq_type:
+        queryset = queryset.filter(equipment_type=eq_type)
+    if status == '1':
+        queryset = queryset.filter(is_active=True)
+    elif status == '0':
+        queryset = queryset.filter(is_active=False)
+
+    stats = {
+        'total_count': queryset.count(),
+        'active': queryset.filter(is_active=True).count(),
+        'asset_value': queryset.aggregate(
+            t=Coalesce(Sum('current_value'), 0, output_field=DecimalField()))['t'],
+        'maintenance_spend': queryset.aggregate(
+            t=Coalesce(Sum('maintenance_logs__cost'), 0, output_field=DecimalField()))['t'],
+        'hours': queryset.aggregate(
+            t=Coalesce(Sum('hours_used'), 0, output_field=DecimalField()))['t'],
+    }
+
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+
+    context = {
+        'app': app,
+        'model': model,
+        'model_name': 'Equipment',
+        'equipment': page_obj,
+        'page_obj': page_obj,
+        'q': q,
+        'filters': {'type': eq_type, 'status': status},
+        'equipment_types': Equipment.EquipmentType.choices,
+        'query_string': query_params.urlencode(),
+        'urls': _crud_urls(app, model),
+        'stats': stats,
+    }
+    return render(request, 'equipment/equipment_list.html', context)
+
+
+def _inventory_list(request, app, model):
+    from inventory.models import InventoryItem
+
+    q = request.GET.get('q', '')
+    stock = request.GET.get('stock', '')
+
+    queryset = scoped_queryset(InventoryItem, request.user, InventoryItem.objects.annotate(
+        stock_value=Coalesce(F('quantity_on_hand') * F('cost_per_unit'), 0, output_field=DecimalField()),
+    )).order_by('name')
+
+    if q:
+        queryset = queryset.filter(
+            Q(name__icontains=q) | Q(supplier__icontains=q))
+    if stock == 'low':
+        queryset = queryset.filter(quantity_on_hand__lte=F('reorder_threshold'))
+    elif stock == 'ok':
+        queryset = queryset.filter(quantity_on_hand__gt=F('reorder_threshold'))
+
+    stats = {
+        'total_count': queryset.count(),
+        'low_stock': queryset.filter(
+            quantity_on_hand__lte=F('reorder_threshold')).count(),
+        'stock_value': queryset.aggregate(
+            t=Coalesce(Sum(F('quantity_on_hand') * F('cost_per_unit')), 0,
+                       output_field=DecimalField()))['t'],
+    }
+
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+
+    context = {
+        'app': app,
+        'model': model,
+        'model_name': 'Inventory',
+        'items': page_obj,
+        'page_obj': page_obj,
+        'q': q,
+        'filters': {'stock': stock},
+        'query_string': query_params.urlencode(),
+        'urls': _crud_urls(app, model),
+        'stats': stats,
+    }
+    return render(request, 'inventory/inventory_list.html', context)
+
+
+def _worker_list(request, app, model):
+    from labor.models import AttendanceRecord, Worker
+
+    q = request.GET.get('q', '')
+    status = request.GET.get('status', '')
+
+    hours_sq = (AttendanceRecord.objects.filter(worker=OuterRef('pk'))
+                .values('worker')
+                .annotate(t=Sum('hours')).values('t'))
+    queryset = scoped_queryset(Worker, request.user, Worker.objects.annotate(
+        task_count=Count('tasks', distinct=True),
+        hours_total=Coalesce(Subquery(hours_sq, output_field=DecimalField()), Value(0),
+                             output_field=DecimalField()),
+    )).order_by('name')
+
+    if q:
+        queryset = queryset.filter(
+            Q(name__icontains=q) | Q(phone__icontains=q) | Q(tax_id__icontains=q))
+    if status == '1':
+        queryset = queryset.filter(is_active=True)
+    elif status == '0':
+        queryset = queryset.filter(is_active=False)
+
+    month_start = datetime.date.today().replace(day=1)
+    month_hours = AttendanceRecord.objects.filter(
+        worker__farm_profile__in=accessible_farms(request.user),
+        date__gte=month_start,
+    ).aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']
+    rates = [w for w in queryset if w.hourly_rate]
+    stats = {
+        'total_count': queryset.count(),
+        'active': queryset.filter(is_active=True).count(),
+        'avg_rate': (sum((w.hourly_rate for w in rates), Decimal('0')) / len(rates)) if rates else Decimal('0'),
+        'month_hours': month_hours,
+    }
+
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+
+    context = {
+        'app': app,
+        'model': model,
+        'model_name': 'Workers',
+        'workers': page_obj,
+        'page_obj': page_obj,
+        'q': q,
+        'filters': {'status': status},
+        'query_string': query_params.urlencode(),
+        'urls': _crud_urls(app, model),
+        'stats': stats,
+    }
+    return render(request, 'labor/worker_list.html', context)
+
+
 @login_required
 def model_list(request, app, model):
+    if (app, model) == ('fields', 'field'):
+        return _field_list(request, app, model)
+    if (app, model) == ('equipment', 'equipment'):
+        return _equipment_list(request, app, model)
+    if (app, model) == ('inventory', 'inventoryitem'):
+        return _inventory_list(request, app, model)
+    if (app, model) == ('labor', 'worker'):
+        return _worker_list(request, app, model)
     if (app, model) == ('crops', 'sale'):
         return _sale_list(request, app, model)
     if (app, model) == ('income', 'income'):
@@ -2293,11 +2508,19 @@ def report_sales(request):
     produce = sales.filter(is_waste=False)
     waste = sales.filter(is_waste=True)
 
+    produce_list = list(produce.select_related(
+        'harvest__crop_season__crop', 'processing_stage', 'inventory_item', 'customer'))
+
+    def _sold_qty(sale):
+        """Quantity converted to the sale's source unit (crop primary)."""
+        if sale.harvest_id and sale.harvest.unit:
+            return sale.quantity_in_unit(sale.harvest.unit)
+        return sale.quantity
+
     gross = produce.aggregate(
         t=Coalesce(Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()))['t']
-    qty_sold = produce.aggregate(
-        t=Coalesce(Sum('quantity'), 0, output_field=DecimalField()))['t']
-    order_count = produce.count()
+    qty_sold = sum((_sold_qty(s) for s in produce_list), Decimal('0'))
+    order_count = len(produce_list)
     avg_order = gross / order_count if order_count else Decimal('0')
     waste_revenue = waste.aggregate(
         t=Coalesce(Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()))['t']
@@ -2313,11 +2536,11 @@ def report_sales(request):
 
     monthly = {f'{chart_year}-{month:02d}': Decimal('0') for month in range(1, 13)}
     monthly_qty = monthly.copy()
-    for d, q, p in produce.filter(sale_date__year=chart_year).values_list(
-            'sale_date', 'quantity', 'unit_price'):
-        key = d.strftime('%Y-%m')
-        monthly[key] += q * p
-        monthly_qty[key] += q
+    for s in produce_list:
+        if s.sale_date and s.sale_date.year == chart_year:
+            key = s.sale_date.strftime('%Y-%m')
+            monthly[key] += s.total_amount
+            monthly_qty[key] += _sold_qty(s)
     monthly_rows = _monthly_chart(monthly)
     monthly_qty_rows = _monthly_chart(monthly_qty)
     revenue_line = _line_chart(monthly_rows)
@@ -2328,11 +2551,18 @@ def report_sales(request):
     crop_groups = list(
         produce.values('harvest__crop_season__crop__name')
         .annotate(
-            qty=Coalesce(Sum('quantity'), 0, output_field=DecimalField()),
             total=Coalesce(
                 Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()),
             n=Count('id'))
         .order_by('-total'))
+    crop_qty = defaultdict(lambda: Decimal('0'))
+    for s in produce_list:
+        key = s.harvest.crop_season.crop.name if (
+            s.harvest_id and s.harvest.crop_season_id and s.harvest.crop_season.crop_id
+        ) else None
+        crop_qty[key] += _sold_qty(s)
+    for row in crop_groups:
+        row['qty'] = crop_qty[row['harvest__crop_season__crop__name']]
     for row in crop_groups:
         row['label'] = row['harvest__crop_season__crop__name'] or '-'
     top_crops = _bar_scale(crop_groups[:8])
@@ -2347,11 +2577,15 @@ def report_sales(request):
             'harvest__crop_season__season_label',
         ).annotate(
             n=Count('id'),
-            qty=Coalesce(Sum('quantity'), 0, output_field=DecimalField()),
             total=Coalesce(Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()),
         ).order_by('-total')
     )
+    season_qty = defaultdict(lambda: Decimal('0'))
+    for s in produce_list:
+        if s.harvest_id and s.harvest.crop_season_id:
+            season_qty[s.harvest.crop_season_id] += _sold_qty(s)
     for row in season_rows:
+        row['qty'] = season_qty[row['harvest__crop_season_id']]
         row['crop'] = row['harvest__crop_season__crop__name'] or '-'
         row['season'] = row['harvest__crop_season__season_label'] or (
             f"{row['harvest__crop_season__field__name']} ({row['harvest__crop_season__planting_date'].year})"
@@ -2367,20 +2601,24 @@ def report_sales(request):
         .annotate(
             buyer=Max('buyer_name'),
             n=Count('id'),
-            qty=Coalesce(Sum('quantity'), 0, output_field=DecimalField()),
             total=Coalesce(
                 Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()))
         .order_by('-total')[:8]))
+    buyer_qty = defaultdict(lambda: Decimal('0'))
+    for s in produce_list:
+        name = s.customer.name if s.customer_id else s.buyer
+        if name:
+            buyer_qty[name.strip().lower()] += _sold_qty(s)
+    for r in top_buyers:
+        r['qty'] = buyer_qty[r['buyer_key'].strip().lower()]
     for r in top_buyers:
         r['label'] = r['buyer']
         r['share'] = round(float(r['total'] / gross * 100), 1) if gross else 0
 
-    receivable = produce.filter(payment_status__in=[Sale.PaymentStatus.PARTIAL,
-                                                  Sale.PaymentStatus.UNPAID]).aggregate(
-        t=Coalesce(Sum(F('quantity') * F('unit_price')), 0, output_field=DecimalField()),
-        n=Count('id'))
-    receivables = receivable['t']
-    receivable_count = receivable['n']
+    open_sales = [s for s in produce_list
+                  if s.payment_status != Sale.PaymentStatus.PAID]
+    receivables = sum((s.receivable for s in open_sales), Decimal('0'))
+    receivable_count = len(open_sales)
 
     method_names = dict(Sale.PaymentMethod.choices)
     pay_rows = list(

@@ -115,7 +115,7 @@ class FarmProfileDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIVi
 
 
 class FieldListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = Field.objects.all()
+    queryset = Field.objects.order_by('name')
     serializer_class = FieldSerializer
     permission_classes = (IsAuthenticated,)
     filterset_class = FieldFilter
