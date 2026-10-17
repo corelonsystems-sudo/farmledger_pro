@@ -1,21 +1,27 @@
 from django.apps import apps
 from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 from django.core.exceptions import FieldError, PermissionDenied, ValidationError
 from django.core.paginator import Paginator
+from django.db import connections
 from django.db.models.deletion import ProtectedError
-from django.db.models import Avg, Count, F, Max, Q, Sum, Value, DecimalField, OuterRef, Subquery
+from django.db.models import Avg, Count, F, Max, Prefetch, Q, Sum, Value, DecimalField, OuterRef, Subquery
 from django.db.models.functions import Coalesce, Lower
 from django.forms import modelform_factory
-from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.urls import reverse
+from django.utils import timezone
 from urllib.parse import quote
 from collections import defaultdict
 from decimal import Decimal
 import datetime
+import json
 import math
+
+from django.conf import settings
 
 from accounts.access import accessible_farms, scoped_queryset, GLOBAL_CATALOGS
 from accounts.models import FarmProfile
@@ -30,10 +36,19 @@ DETAIL_URL_NAMES = {
     ('crops', 'crop'): 'crop_detail',
     ('crops', 'cropseason'): 'crop_season_detail',
     ('crops', 'harvestrecord'): 'harvest_detail',
+    ('crops', 'sale'): 'sale_detail',
+    ('crops', 'customer'): 'customer_detail',
     ('budgets', 'budget'): 'budget_detail',
     ('expenses', 'category'): 'budget_code_detail',
     ('income', 'incomesource'): 'income_source_detail',
-    ('crops', 'customer'): 'customer_detail',
+    ('fields', 'field'): 'field_detail',
+    ('fields', 'landparcel'): 'landparcel_detail',
+    ('equipment', 'equipment'): 'equipment_detail',
+    ('inventory', 'inventoryitem'): 'inventoryitem_detail',
+    ('labor', 'worker'): 'worker_detail',
+    ('labor', 'task'): 'task_detail',
+    ('labor', 'payrollrun'): 'payrollrun_detail',
+    ('livestock', 'animalrecord'): 'animalrecord_detail',
 }
 
 # Override generic dashboard list columns for specific models.
@@ -650,6 +665,7 @@ def _sale_list(request, app, model):
         'view_label': 'Waste Details' if is_waste else 'Sale Details',
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'crops.sale')
     return render(request, 'crops/sale_list.html', context)
 
 
@@ -740,6 +756,7 @@ def _income_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'income.income')
     return render(request, 'income/income_list.html', context)
 
 
@@ -788,6 +805,7 @@ def _income_source_list(request, app, model):
         'app': app,
         'model': model,
         'model_name': 'Income Sources',
+        'can_write': _can_write(request.user, 'income.incomesource'),
         'income_sources': page_obj,
         'page_obj': page_obj,
         'q': q,
@@ -844,6 +862,7 @@ def _crop_list(request, app, model):
         'app': app,
         'model': model,
         'model_name': 'Crops',
+        'can_write': _can_write(request.user, 'crops.crop'),
         'crops': page_obj,
         'page_obj': page_obj,
         'q': q,
@@ -911,6 +930,7 @@ def _crop_season_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'crops.cropseason')
     return render(request, 'crops/crop_season_list.html', context)
 
 
@@ -983,6 +1003,7 @@ def _harvest_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'crops.harvestrecord')
     return render(request, 'crops/harvest_list.html', context)
 
 
@@ -1035,6 +1056,7 @@ def _processing_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'crops.processingstage')
     return render(request, 'crops/processing_list.html', context)
 
 
@@ -1121,6 +1143,7 @@ def _budget_list(request, app, model):
         'stats': stats,
         'can_create_budget': request.user.is_superuser or accessible_farms(request.user, write_model='budgets.budget').exists(),
     }
+    context['can_write'] = _can_write(request.user, 'budgets.budget')
     return render(request, 'budgets/budget_list.html', context)
 
 
@@ -1207,6 +1230,7 @@ def _budget_item_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'budgets.budgetitem')
     return render(request, 'budgets/budget_item_list.html', context)
 
 
@@ -1267,6 +1291,7 @@ def _budget_code_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'expenses.category')
     return render(request, 'budgets/budget_code_list.html', context)
 
 
@@ -1351,10 +1376,12 @@ def _expense_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'expenses.expense')
     return render(request, 'expenses/expense_list.html', context)
 
 
 def _field_list(request, app, model):
+    from crops.models import CropSeason
     from fields.models import Field
 
     q = request.GET.get('q', '')
@@ -1364,6 +1391,10 @@ def _field_list(request, app, model):
     queryset = scoped_queryset(Field, request.user, Field.objects.annotate(
         season_count=Count('crop_seasons', distinct=True),
         parcel_count=Count('parcels', distinct=True),
+    ).prefetch_related(
+        Prefetch('crop_seasons',
+                 queryset=scoped_queryset(CropSeason, request.user)
+                 .select_related('crop').order_by('-planting_date')),
     )).order_by('name')
 
     if q:
@@ -1388,6 +1419,17 @@ def _field_list(request, app, model):
     query_params = request.GET.copy()
     query_params.pop('page', None)
 
+    for field in page_obj:
+        crop_years = {}
+        for season in field.crop_seasons.all():
+            name = season.crop.name if season.crop_id else 'Unspecified crop'
+            crop_years.setdefault(name, [])
+            if season.planting_date.year not in crop_years[name]:
+                crop_years[name].append(season.planting_date.year)
+        field.crops_summary = '; '.join(
+            f"{name} ({', '.join(str(y) for y in years)})"
+            for name, years in crop_years.items())
+
     context = {
         'app': app,
         'model': model,
@@ -1401,6 +1443,7 @@ def _field_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'fields.field')
     return render(request, 'fields/field_list.html', context)
 
 
@@ -1454,6 +1497,7 @@ def _equipment_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'equipment.equipment')
     return render(request, 'equipment/equipment_list.html', context)
 
 
@@ -1501,6 +1545,7 @@ def _inventory_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'inventory.inventoryitem')
     return render(request, 'inventory/inventory_list.html', context)
 
 
@@ -1557,11 +1602,1871 @@ def _worker_list(request, app, model):
         'urls': _crud_urls(app, model),
         'stats': stats,
     }
+    context['can_write'] = _can_write(request.user, 'labor.worker')
     return render(request, 'labor/worker_list.html', context)
+
+
+# -- Animals section: shared styled list driver -------------------------------
+
+_LIVESTOCK_PILL = {
+    'HEALTHY': 'green', 'SICK': 'red', 'TREATED': 'amber',
+    'QUARANTINED': 'amber', 'DECEASED': 'slate',
+    'ACTIVE': 'green', 'SOLD': 'blue', 'CULLED': 'amber',
+    'PLANNED': 'slate', 'MATED': 'blue', 'PREGNANT': 'teal',
+    'DELIVERED': 'green', 'FAILED': 'red',
+    'PENDING': 'amber', 'COMPLETED': 'green',
+    'ASSIGNED': 'blue', 'IN_PROGRESS': 'amber', 'CANCELLED': 'slate',
+    'OWNED': 'teal', 'LEASED': 'amber', 'RENTED': 'amber',
+}
+
+
+def _pill(text, color='slate'):
+    return {'kind': 'pill', 'text': text, 'pill': color}
+
+
+def _status_pill(value, display):
+    return _pill(display, _LIVESTOCK_PILL.get(value, 'slate'))
+
+
+def _money(value):
+    return {'kind': 'money', 'value': value}
+
+
+def _main(text, sub=''):
+    return {'kind': 'main', 'text': text, 'sub': sub}
+
+
+def _f(name, label, apply, type='text', options=None, all_label='All', placeholder=''):
+    return {'name': name, 'label': label, 'type': type, 'apply': apply,
+            'options': options, 'all_label': all_label, 'placeholder': placeholder}
+
+
+def _q_filter(*fields):
+    def apply(qs, v):
+        if not v:
+            return qs
+        cond = Q()
+        for f in fields:
+            cond |= Q(**{f'{f}__icontains': v})
+        return qs.filter(cond)
+    return apply
+
+
+def _section_list(request, app, model, *, queryset, title, subtitle, nav,
+                  columns, row_fn, filter_specs=(), stats_fn=None,
+                  create_label='Add Record', table_title=None, section='Animals'):
+    """Render a KPI + filter + table list page on dashboard/section_list.html."""
+    filters = []
+    for spec in filter_specs:
+        spec = dict(spec)
+        spec['value'] = request.GET.get(spec['name'], '')
+        if callable(spec.get('options')):
+            spec['options'] = spec['options'](request)
+        queryset = spec['apply'](queryset, spec['value'])
+        filters.append(spec)
+    stats = stats_fn(queryset) if stats_fn else []
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+    qp = request.GET.copy()
+    qp.pop('page', None)
+    detail_name = DETAIL_URL_NAMES.get((app, model))
+    rows = []
+    for obj in page_obj:
+        row = dict(row_fn(obj), pk=obj.pk)
+        if detail_name:
+            row['detail_url'] = reverse(detail_name, args=[obj.pk])
+        rows.append(row)
+    label = f'{app}.{model}'
+    context = {
+        'app': app, 'model': model, 'title': title, 'subtitle': subtitle,
+        'nav': nav, 'columns': columns, 'rows': rows, 'page_obj': page_obj,
+        'filters': filters, 'filters_active': any(f['value'] for f in filters),
+        'stats': stats, 'urls': _crud_urls(app, model),
+        'query_string': qp.urlencode(), 'create_label': create_label,
+        'table_title': table_title or title, 'section': section,
+        'can_write': _can_write(request.user, label),
+    }
+    return render(request, 'dashboard/section_list.html', context)
+
+
+def _animal_species_list(request, app, model):
+    from livestock.models import AnimalSpecies
+    qs = AnimalSpecies.objects.annotate(
+        group_count=Count('groups', distinct=True),
+        animal_count=Count('individuals', distinct=True),
+    ).order_by('name')
+    columns = [
+        {'key': 'name', 'label': 'Species / Breed'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'origin', 'label': 'Origin'},
+        {'key': 'weight', 'label': 'Avg Weight', 'class': 'num'},
+        {'key': 'groups', 'label': 'Groups', 'class': 'num'},
+        {'key': 'animals', 'label': 'Animals', 'class': 'num'},
+    ]
+    def row(s):
+        return {
+            'name': _main(s.name, s.description[:80] if s.description else ''),
+            'type': _pill(s.get_species_type_display(), 'teal'),
+            'origin': s.breed_origin,
+            'weight': f'{s.average_weight_kg} kg' if s.average_weight_kg else '',
+            'groups': s.group_count,
+            'animals': s.animal_count,
+        }
+    return _section_list(
+        request, app, model, queryset=qs,
+        title='Livestock Species', table_title='Species & Breeds',
+        subtitle='The species and breeds registry behind your herds and flocks.',
+        nav='animalspecies', columns=columns, row_fn=row,
+        create_label='Add Species',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('name', 'breed_origin', 'description'),
+               placeholder='Breed or species...'),
+            _f('type', 'Species Type',
+               lambda qs, v: qs.filter(species_type=v) if v else qs,
+               type='select', options=AnimalSpecies.SpeciesType.choices,
+               all_label='All Types'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Species', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Animal Groups', 'value': qs.aggregate(t=Coalesce(Sum('group_count'), 0))['t'], 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Animals Tracked', 'value': qs.aggregate(t=Coalesce(Sum('animal_count'), 0))['t'], 'icon': 'heart', 'color': 'teal'},
+        ])
+
+
+def _animal_group_list(request, app, model):
+    from livestock.models import AnimalGroup, AnimalSpecies
+    qs = scoped_queryset(AnimalGroup, request.user,
+                         AnimalGroup.objects.select_related('species', 'field'))
+    columns = [
+        {'key': 'name', 'label': 'Group'},
+        {'key': 'purpose', 'label': 'Purpose'},
+        {'key': 'field', 'label': 'Field / Pen'},
+        {'key': 'count', 'label': 'Head', 'class': 'num'},
+        {'key': 'established', 'label': 'Established'},
+        {'key': 'status', 'label': 'Status'},
+    ]
+    def row(g):
+        return {
+            'name': _main(g.name, str(g.species)),
+            'purpose': _pill(g.get_purpose_display(), 'blue'),
+            'field': g.field.name if g.field_id else '',
+            'count': g.count,
+            'established': g.date_established,
+            'status': _status_pill('ACTIVE' if g.is_active else 'INACTIVE', 'Active' if g.is_active else 'Inactive'),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('name'),
+        title='Animal Groups', table_title='Herds & Flocks',
+        subtitle='Herds and flocks — group-level tracking for grazing, feeding, and production.',
+        nav='animalgroup', columns=columns, row_fn=row,
+        create_label='Add Group',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('name', 'species__name'), placeholder='Group or species...'),
+            _f('species', 'Species',
+               lambda qs, v: qs.filter(species_id=v) if v else qs, type='select',
+               options=lambda r: [(s.pk, str(s)) for s in AnimalSpecies.objects.order_by('name')],
+               all_label='All Species'),
+            _f('purpose', 'Purpose',
+               lambda qs, v: qs.filter(purpose=v) if v else qs, type='select',
+               options=AnimalGroup.Purpose.choices),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(is_active=(v == '1')) if v else qs,
+               type='select', options=[('1', 'Active'), ('0', 'Inactive')]),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Groups', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Total Head', 'value': qs.aggregate(t=Coalesce(Sum('count'), 0))['t'], 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Active', 'value': qs.filter(is_active=True).count(), 'icon': 'check', 'color': 'teal'},
+        ])
+
+
+def _animal_record_list(request, app, model):
+    from livestock.models import AnimalRecord, AnimalSpecies
+    qs = scoped_queryset(AnimalRecord, request.user,
+                         AnimalRecord.objects.select_related('species', 'group'))
+    columns = [
+        {'key': 'tag', 'label': 'Animal'},
+        {'key': 'species', 'label': 'Species'},
+        {'key': 'gender', 'label': 'Gender'},
+        {'key': 'group', 'label': 'Group'},
+        {'key': 'weight', 'label': 'Weight', 'class': 'num'},
+        {'key': 'health', 'label': 'Health'},
+        {'key': 'sold', 'label': 'Sold'},
+    ]
+    def row(a):
+        return {
+            'tag': _main(f'#{a.tag_number}', a.name),
+            'species': str(a.species),
+            'gender': a.get_gender_display(),
+            'group': a.group.name if a.group_id else '',
+            'weight': f'{a.current_weight_kg} kg' if a.current_weight_kg else '',
+            'health': _status_pill(a.health_status, a.get_health_status_display()),
+            'sold': _pill('Sold', 'blue') if a.is_sold else _pill('On farm', 'green'),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('tag_number'),
+        title='Animal Records', table_title='Individual Animals',
+        subtitle='Individually tracked animals — tags, weights, health, and sales.',
+        nav='animalrecord', columns=columns, row_fn=row,
+        create_label='Add Animal',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('tag_number', 'name', 'species__name'),
+               placeholder='Tag or name...'),
+            _f('species', 'Species',
+               lambda qs, v: qs.filter(species_id=v) if v else qs, type='select',
+               options=lambda r: [(s.pk, str(s)) for s in AnimalSpecies.objects.order_by('name')],
+               all_label='All Species'),
+            _f('health', 'Health',
+               lambda qs, v: qs.filter(health_status=v) if v else qs, type='select',
+               options=AnimalRecord.HealthStatus.choices),
+            _f('sold', 'Status',
+               lambda qs, v: qs.filter(is_sold=(v == '1')) if v else qs, type='select',
+               options=[('0', 'On farm'), ('1', 'Sold')]),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Animals', 'value': qs.count(), 'icon': 'tag', 'color': 'green'},
+            {'label': 'Healthy', 'value': qs.filter(health_status='HEALTHY').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Sick / In Treatment', 'value': qs.filter(health_status__in=('SICK', 'TREATED', 'QUARANTINED')).count(), 'icon': 'alert', 'color': 'red'},
+            {'label': 'Sold', 'value': qs.filter(is_sold=True).count(), 'icon': 'money', 'color': 'blue'},
+        ])
+
+
+def _health_record_list(request, app, model):
+    from livestock.models import AnimalHealthRecord
+    today = datetime.date.today()
+    qs = scoped_queryset(AnimalHealthRecord, request.user,
+                         AnimalHealthRecord.objects.select_related('animal', 'animal__species'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'animal', 'label': 'Animal'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'medication', 'label': 'Medication'},
+        {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+        {'key': 'vet', 'label': 'Vet'},
+        {'key': 'due', 'label': 'Next Due'},
+    ]
+    def row(r):
+        return {
+            'date': r.date,
+            'animal': _main(f'#{r.animal.tag_number}', str(r.animal.species)),
+            'type': _pill(r.get_record_type_display(), 'teal'),
+            'medication': _main(r.medication, r.dosage) if r.medication else _main(r.description[:60]),
+            'cost': _money(r.cost),
+            'vet': r.veterinarian,
+            'due': r.next_due_date,
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Health Records', table_title='Vaccinations & Treatments',
+        subtitle='Vaccinations, treatments, and vet visits for individual animals.',
+        nav='animalhealthrecord', columns=columns, row_fn=row,
+        create_label='Add Record',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('animal__tag_number', 'animal__name', 'medication', 'veterinarian'),
+               placeholder='Tag, medication, vet...'),
+            _f('type', 'Record Type',
+               lambda qs, v: qs.filter(record_type=v) if v else qs, type='select',
+               options=AnimalHealthRecord.RecordType.choices, all_label='All Types'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'heart', 'color': 'green'},
+            {'label': 'Vaccinations', 'value': qs.filter(record_type='VACCINATION').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Upcoming Due', 'value': qs.filter(next_due_date__gte=today).count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Total Cost', 'value': qs.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+        ])
+
+
+def _breeding_list(request, app, model):
+    from livestock.models import BreedingRecord, AnimalSpecies
+    qs = scoped_queryset(BreedingRecord, request.user,
+                         BreedingRecord.objects.select_related('dam', 'sire', 'species'))
+    columns = [
+        {'key': 'mated', 'label': 'Mating Date'},
+        {'key': 'dam', 'label': 'Dam'},
+        {'key': 'sire', 'label': 'Sire'},
+        {'key': 'species', 'label': 'Species'},
+        {'key': 'status', 'label': 'Status'},
+        {'key': 'expected', 'label': 'Expected Delivery'},
+        {'key': 'offspring', 'label': 'Offspring', 'class': 'num'},
+    ]
+    def row(b):
+        return {
+            'mated': b.mating_date,
+            'dam': f'#{b.dam.tag_number}' if b.dam_id else '',
+            'sire': f'#{b.sire.tag_number}' if b.sire_id else '',
+            'species': str(b.species),
+            'status': _status_pill(b.status, b.get_status_display()),
+            'expected': b.expected_delivery_date,
+            'offspring': f'{b.offspring_alive}/{b.offspring_count}' if b.offspring_count else '',
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-mating_date'),
+        title='Breeding Records', table_title='Mating & Pregnancy',
+        subtitle='Mating, pregnancy, and delivery tracking across the herd.',
+        nav='breedingrecord', columns=columns, row_fn=row,
+        create_label='Add Breeding Record',
+        filter_specs=[
+            _f('species', 'Species',
+               lambda qs, v: qs.filter(species_id=v) if v else qs, type='select',
+               options=lambda r: [(s.pk, str(s)) for s in AnimalSpecies.objects.order_by('name')],
+               all_label='All Species'),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(status=v) if v else qs, type='select',
+               options=BreedingRecord.Status.choices),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'In Progress', 'value': qs.filter(status__in=('MATED', 'PREGNANT')).count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Delivered', 'value': qs.filter(status='DELIVERED').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Offspring Born', 'value': qs.aggregate(t=Coalesce(Sum('offspring_count'), 0))['t'], 'icon': 'heart', 'color': 'blue'},
+        ])
+
+
+def _feed_log_list(request, app, model):
+    from livestock.models import AnimalFeedLog, AnimalGroup
+    today = datetime.date.today()
+    qs = scoped_queryset(AnimalFeedLog, request.user,
+                         AnimalFeedLog.objects.select_related('group', 'group__species'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'group', 'label': 'Group'},
+        {'key': 'feed', 'label': 'Feed Type'},
+        {'key': 'qty', 'label': 'Quantity', 'class': 'num'},
+        {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+        {'key': 'notes', 'label': 'Notes'},
+    ]
+    def row(l):
+        return {
+            'date': l.date,
+            'group': _main(l.group.name, str(l.group.species)),
+            'feed': l.feed_type,
+            'qty': f'{l.quantity_kg} kg',
+            'cost': _money(l.cost),
+            'notes': l.notes[:60],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Feed Logs', table_title='Animal Feed Consumption',
+        subtitle='What each herd or flock was fed, and what it cost.',
+        nav='animalfeedlog', columns=columns, row_fn=row,
+        create_label='Log Feed',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('feed_type', 'group__name', 'notes'), placeholder='Feed or group...'),
+            _f('group', 'Group',
+               lambda qs, v: qs.filter(group_id=v) if v else qs, type='select',
+               options=lambda r: [(g.pk, g.name) for g in scoped_queryset(AnimalGroup, r.user).order_by('name')],
+               all_label='All Groups'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Entries', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Feed Given', 'value': f"{qs.aggregate(t=Coalesce(Sum('quantity_kg'), 0, output_field=DecimalField()))['t']} kg", 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Total Cost', 'value': qs.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'teal'},
+            {'label': 'This Month', 'value': qs.filter(date__year=today.year, date__month=today.month).aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'clock', 'color': 'amber'},
+        ])
+
+
+def _milk_list(request, app, model):
+    from livestock.models import MilkProductionRecord, AnimalGroup
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(MilkProductionRecord, request.user,
+                         MilkProductionRecord.objects.select_related('group', 'group__species'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'group', 'label': 'Group'},
+        {'key': 'morning', 'label': 'Morning', 'class': 'num'},
+        {'key': 'evening', 'label': 'Evening', 'class': 'num'},
+        {'key': 'total', 'label': 'Total', 'class': 'num'},
+        {'key': 'revenue', 'label': 'Revenue', 'class': 'num'},
+        {'key': 'buyer', 'label': 'Buyer'},
+    ]
+    def row(m):
+        return {
+            'date': m.date,
+            'group': _main(m.group.name, str(m.group.species)),
+            'morning': f'{m.morning_liters} L',
+            'evening': f'{m.evening_liters} L',
+            'total': f'{m.total_liters} L',
+            'revenue': _money(m.total_liters * m.price_per_liter),
+            'buyer': m.buyer,
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Milk Production', table_title='Daily Milk Records',
+        subtitle='Daily yields per dairy group — morning and evening milkings.',
+        nav='milkproductionrecord', columns=columns, row_fn=row,
+        create_label='Log Milk',
+        filter_specs=[
+            _f('group', 'Group',
+               lambda qs, v: qs.filter(group_id=v) if v else qs, type='select',
+               options=lambda r: [(g.pk, g.name) for g in scoped_queryset(AnimalGroup, r.user).order_by('name')],
+               all_label='All Groups'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Litres Recorded', 'value': f"{qs.aggregate(t=Coalesce(Sum('total_liters'), 0, output_field=DecimalField()))['t']} L", 'icon': 'tag', 'color': 'blue'},
+            {'label': 'This Month', 'value': f"{qs.filter(**month).aggregate(t=Coalesce(Sum('total_liters'), 0, output_field=DecimalField()))['t']} L", 'icon': 'clock', 'color': 'teal'},
+            {'label': 'Month Revenue', 'value': qs.filter(**month).aggregate(t=Coalesce(Sum(F('total_liters') * F('price_per_liter')), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'amber'},
+        ])
+
+
+def _poultry_batch_list(request, app, model):
+    from livestock.models import PoultryBatch
+    qs = scoped_queryset(PoultryBatch, request.user, PoultryBatch.objects.all())
+    columns = [
+        {'key': 'batch', 'label': 'Batch'},
+        {'key': 'type', 'label': 'Bird Type'},
+        {'key': 'purpose', 'label': 'Purpose'},
+        {'key': 'count', 'label': 'Birds', 'class': 'num'},
+        {'key': 'mortality', 'label': 'Mortality', 'class': 'num'},
+        {'key': 'housing', 'label': 'Housing'},
+        {'key': 'status', 'label': 'Status'},
+    ]
+    def row(b):
+        return {
+            'batch': _main(b.batch_name, b.breed),
+            'type': _pill(b.get_bird_type_display(), 'teal'),
+            'purpose': _pill(b.get_purpose_display(), 'blue'),
+            'count': f'{b.current_count} / {b.initial_count}',
+            'mortality': f'{b.mortality_rate:.1f}%',
+            'housing': b.housing,
+            'status': _status_pill(b.status, b.get_status_display()),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-start_date'),
+        title='Poultry Batches', table_title='Flocks',
+        subtitle='Each flock of birds — counts, mortality, housing, and status.',
+        nav='poultrybatch', columns=columns, row_fn=row,
+        create_label='Add Batch',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('batch_name', 'breed', 'housing'), placeholder='Batch or breed...'),
+            _f('type', 'Bird Type',
+               lambda qs, v: qs.filter(bird_type=v) if v else qs, type='select',
+               options=PoultryBatch.BirdType.choices, all_label='All Types'),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(status=v) if v else qs, type='select',
+               options=PoultryBatch.Status.choices),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Batches', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Live Birds', 'value': qs.aggregate(t=Coalesce(Sum('current_count'), 0))['t'], 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Active', 'value': qs.filter(status='ACTIVE').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Total Mortality', 'value': qs.aggregate(t=Coalesce(Sum('mortality_count'), 0))['t'], 'icon': 'alert', 'color': 'red'},
+        ])
+
+
+def _egg_list(request, app, model):
+    from livestock.models import EggProductionRecord, PoultryBatch
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(EggProductionRecord, request.user,
+                         EggProductionRecord.objects.select_related('batch'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'batch', 'label': 'Batch'},
+        {'key': 'collected', 'label': 'Collected', 'class': 'num'},
+        {'key': 'damaged', 'label': 'Damaged', 'class': 'num'},
+        {'key': 'saleable', 'label': 'Saleable', 'class': 'num'},
+        {'key': 'lay', 'label': 'Lay Rate', 'class': 'num'},
+        {'key': 'revenue', 'label': 'Revenue', 'class': 'num'},
+    ]
+    def row(e):
+        return {
+            'date': e.date,
+            'batch': e.batch.batch_name,
+            'collected': e.eggs_collected,
+            'damaged': e.damaged_eggs,
+            'saleable': e.saleable_eggs,
+            'lay': f'{e.lay_rate:.0f}%',
+            'revenue': _money(e.revenue),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Egg Production', table_title='Daily Collections',
+        subtitle='Eggs collected per batch, damage losses, and sale value.',
+        nav='eggproductionrecord', columns=columns, row_fn=row,
+        create_label='Log Eggs',
+        filter_specs=[
+            _f('batch', 'Batch',
+               lambda qs, v: qs.filter(batch_id=v) if v else qs, type='select',
+               options=lambda r: [(b.pk, b.batch_name) for b in scoped_queryset(PoultryBatch, r.user).order_by('batch_name')],
+               all_label='All Batches'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Eggs Collected', 'value': qs.aggregate(t=Coalesce(Sum('eggs_collected'), 0))['t'], 'icon': 'tag', 'color': 'blue'},
+            {'label': 'This Month', 'value': qs.filter(**month).aggregate(t=Coalesce(Sum('eggs_collected'), 0))['t'], 'icon': 'clock', 'color': 'teal'},
+            {'label': 'Month Revenue', 'value': qs.filter(**month).aggregate(t=Coalesce(Sum(F('saleable_eggs') * F('price_per_egg')), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'amber'},
+        ])
+
+
+def _poultry_feed_list(request, app, model):
+    from livestock.models import PoultryFeedLog, PoultryBatch
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(PoultryFeedLog, request.user,
+                         PoultryFeedLog.objects.select_related('batch'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'batch', 'label': 'Batch'},
+        {'key': 'feed', 'label': 'Feed Type'},
+        {'key': 'qty', 'label': 'Quantity', 'class': 'num'},
+        {'key': 'per_bird', 'label': 'Per Bird', 'class': 'num'},
+        {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+        {'key': 'notes', 'label': 'Notes'},
+    ]
+    def row(l):
+        return {
+            'date': l.date,
+            'batch': l.batch.batch_name,
+            'feed': l.feed_type,
+            'qty': f'{l.quantity_kg} kg',
+            'per_bird': f'{l.feed_per_bird:.2f} kg' if l.batch.current_count else '',
+            'cost': _money(l.cost),
+            'notes': l.notes[:60],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Poultry Feed Logs', table_title='Feed Consumption',
+        subtitle='Feed given to each flock, per-bird ration, and cost.',
+        nav='poultryfeedlog', columns=columns, row_fn=row,
+        create_label='Log Feed',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('feed_type', 'batch__batch_name', 'notes'), placeholder='Feed or batch...'),
+            _f('batch', 'Batch',
+               lambda qs, v: qs.filter(batch_id=v) if v else qs, type='select',
+               options=lambda r: [(b.pk, b.batch_name) for b in scoped_queryset(PoultryBatch, r.user).order_by('batch_name')],
+               all_label='All Batches'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Entries', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Feed Given', 'value': f"{qs.aggregate(t=Coalesce(Sum('quantity_kg'), 0, output_field=DecimalField()))['t']} kg", 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Total Cost', 'value': qs.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'teal'},
+            {'label': 'This Month', 'value': qs.filter(**month).aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'clock', 'color': 'amber'},
+        ])
+
+
+def _poultry_health_list(request, app, model):
+    from livestock.models import PoultryHealthRecord, PoultryBatch
+    today = datetime.date.today()
+    qs = scoped_queryset(PoultryHealthRecord, request.user,
+                         PoultryHealthRecord.objects.select_related('batch'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'batch', 'label': 'Batch'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'description', 'label': 'Description'},
+        {'key': 'birds', 'label': 'Birds Affected', 'class': 'num'},
+        {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+        {'key': 'due', 'label': 'Next Due'},
+    ]
+    def row(r):
+        return {
+            'date': r.date,
+            'batch': r.batch.batch_name,
+            'type': _pill(r.get_record_type_display(), 'teal'),
+            'description': _main(r.medication, r.description[:60]) if r.medication else r.description[:80],
+            'birds': r.birds_affected or '',
+            'cost': _money(r.cost),
+            'due': r.next_due_date,
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Poultry Health', table_title='Flock Health Records',
+        subtitle='Vaccinations, supplements, and treatments per flock.',
+        nav='poultryhealthrecord', columns=columns, row_fn=row,
+        create_label='Add Record',
+        filter_specs=[
+            _f('type', 'Record Type',
+               lambda qs, v: qs.filter(record_type=v) if v else qs, type='select',
+               options=PoultryHealthRecord.RecordType.choices, all_label='All Types'),
+            _f('batch', 'Batch',
+               lambda qs, v: qs.filter(batch_id=v) if v else qs, type='select',
+               options=lambda r: [(b.pk, b.batch_name) for b in scoped_queryset(PoultryBatch, r.user).order_by('batch_name')],
+               all_label='All Batches'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'heart', 'color': 'green'},
+            {'label': 'Vaccinations', 'value': qs.filter(record_type='VACCINATION').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Upcoming Due', 'value': qs.filter(next_due_date__gte=today).count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Total Cost', 'value': qs.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+        ])
+
+
+# -- Operations section pages -------------------------------------------------
+
+def _land_parcel_list(request, app, model):
+    from fields.models import LandParcel
+    today = datetime.date.today()
+    expiring = today + datetime.timedelta(days=60)
+    qs = scoped_queryset(LandParcel, request.user,
+                         LandParcel.objects.select_related('field'))
+    columns = [
+        {'key': 'parcel', 'label': 'Parcel'},
+        {'key': 'type', 'label': 'Tenure'},
+        {'key': 'lease', 'label': 'Lease Status'},
+        {'key': 'cost', 'label': 'Lease Cost', 'class': 'num'},
+        {'key': 'start', 'label': 'Lease Start'},
+        {'key': 'end', 'label': 'Lease End'},
+        {'key': 'owner', 'label': 'Landowner'},
+    ]
+    def row(p):
+        if p.land_type == 'OWNED':
+            lease = _pill('Owned', 'teal')
+        elif p.lease_end and p.lease_end < today:
+            lease = _pill('Expired', 'red')
+        elif p.lease_end and p.lease_end <= expiring:
+            lease = _pill('Expiring', 'amber')
+        else:
+            lease = _pill('Active', 'green')
+        return {
+            'parcel': _main(p.field.name, f'{p.field.acreage} ac'),
+            'type': _pill(p.get_land_type_display(), 'teal' if p.land_type == 'OWNED' else 'amber'),
+            'lease': lease,
+            'cost': _money(p.lease_cost),
+            'start': p.lease_start,
+            'end': p.lease_end,
+            'owner': p.owner_name,
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('field__name'),
+        title='Land Parcels', table_title='Parcels',
+        subtitle='Owned, leased, and rented parcels attached to your fields.',
+        nav='landparcel', columns=columns, row_fn=row, section='Operations',
+        create_label='Add Parcel',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('field__name', 'owner_name'), placeholder='Field or owner...'),
+            _f('type', 'Tenure',
+               lambda qs, v: qs.filter(land_type=v) if v else qs, type='select',
+               options=LandParcel.LandType.choices, all_label='All Types'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Parcels', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Leased / Rented', 'value': qs.filter(land_type__in=('LEASED', 'RENTED')).count(), 'icon': 'tag', 'color': 'amber'},
+            {'label': 'Lease Costs', 'value': qs.aggregate(t=Coalesce(Sum('lease_cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+            {'label': 'Expiring ≤60d', 'value': qs.exclude(land_type='OWNED').filter(
+                lease_end__gte=today, lease_end__lte=expiring).count(), 'icon': 'alert', 'color': 'red'},
+        ])
+
+
+def _maintenance_list(request, app, model):
+    from equipment.models import Equipment, MaintenanceLog
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(MaintenanceLog, request.user,
+                         MaintenanceLog.objects.select_related('equipment'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'equipment', 'label': 'Equipment'},
+        {'key': 'description', 'label': 'Work Done'},
+        {'key': 'by', 'label': 'Performed By'},
+        {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+    ]
+    def row(l):
+        return {
+            'date': l.date,
+            'equipment': l.equipment.name,
+            'description': _main(l.description[:80]),
+            'by': l.performed_by,
+            'cost': _money(l.cost),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Maintenance Logs', table_title='Equipment Maintenance',
+        subtitle='Service history — what was repaired or serviced, by whom, at what cost.',
+        nav='maintenancelog', columns=columns, row_fn=row, section='Operations',
+        create_label='Log Maintenance',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('description', 'performed_by', 'equipment__name'),
+               placeholder='Work, technician, equipment...'),
+            _f('equipment', 'Equipment',
+               lambda qs, v: qs.filter(equipment_id=v) if v else qs, type='select',
+               options=lambda r: [(e.pk, e.name) for e in scoped_queryset(Equipment, r.user).order_by('name')],
+               all_label='All Equipment'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Service Logs', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Total Spend', 'value': qs.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+            {'label': 'This Month', 'value': qs.filter(**month).aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Equipment Serviced', 'value': qs.values('equipment_id').distinct().count(), 'icon': 'check', 'color': 'teal'},
+        ])
+
+
+def _equipment_usage_list(request, app, model):
+    from equipment.models import Equipment, EquipmentUsage
+    from fields.models import Field
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(EquipmentUsage, request.user,
+                         EquipmentUsage.objects.select_related(
+                             'equipment', 'field', 'crop_season', 'crop_season__crop'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'equipment', 'label': 'Equipment'},
+        {'key': 'field', 'label': 'Field'},
+        {'key': 'season', 'label': 'Crop Season'},
+        {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+        {'key': 'description', 'label': 'Work'},
+    ]
+    def row(u):
+        season = u.crop_season
+        return {
+            'date': u.date,
+            'equipment': u.equipment.name,
+            'field': u.field.name if u.field_id else '',
+            'season': str(season) if u.crop_season_id else '',
+            'hours': f'{u.hours}h',
+            'description': u.description[:60],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Equipment Usage', table_title='Usage Log',
+        subtitle='Where and when machinery was run — hours per field and season.',
+        nav='equipmentusage', columns=columns, row_fn=row, section='Operations',
+        create_label='Log Usage',
+        filter_specs=[
+            _f('equipment', 'Equipment',
+               lambda qs, v: qs.filter(equipment_id=v) if v else qs, type='select',
+               options=lambda r: [(e.pk, e.name) for e in scoped_queryset(Equipment, r.user).order_by('name')],
+               all_label='All Equipment'),
+            _f('field', 'Field',
+               lambda qs, v: qs.filter(field_id=v) if v else qs, type='select',
+               options=lambda r: [(f.pk, f.name) for f in scoped_queryset(Field, r.user).order_by('name')],
+               all_label='All Fields'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Usage Records', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Total Hours', 'value': f"{qs.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
+            {'label': 'This Month', 'value': f"{qs.filter(**month).aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Equipment Used', 'value': qs.values('equipment_id').distinct().count(), 'icon': 'check', 'color': 'teal'},
+        ])
+
+
+def _stock_txn_list(request, app, model):
+    from inventory.models import InventoryItem, InventoryTransaction
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(InventoryTransaction, request.user,
+                         InventoryTransaction.objects.select_related('item', 'budget_item'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'item', 'label': 'Item'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'qty', 'label': 'Qty', 'class': 'num'},
+        {'key': 'unit_cost', 'label': 'Unit Cost', 'class': 'num'},
+        {'key': 'total', 'label': 'Value', 'class': 'num'},
+        {'key': 'notes', 'label': 'Notes'},
+    ]
+    def row(t):
+        return {
+            'date': t.date,
+            'item': t.item.name,
+            'type': _pill(t.get_transaction_type_display(),
+                          {'PURCHASE': 'green', 'USAGE': 'amber'}.get(t.transaction_type, 'slate')),
+            'qty': f'{t.quantity} {t.item.unit}',
+            'unit_cost': _money(t.unit_cost),
+            'total': _money(t.quantity * t.unit_cost),
+            'notes': t.notes[:60],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date', '-created_at'),
+        title='Stock Transactions', table_title='Purchase / Usage / Adjustment Log',
+        subtitle='Every movement of stock — purchases post expenses, usage draws down.',
+        nav='inventorytransaction', columns=columns, row_fn=row, section='Operations',
+        create_label='Add Transaction',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('item__name', 'notes'), placeholder='Item or notes...'),
+            _f('type', 'Type',
+               lambda qs, v: qs.filter(transaction_type=v) if v else qs, type='select',
+               options=InventoryTransaction.TransactionType.choices, all_label='All Types'),
+            _f('item', 'Item',
+               lambda qs, v: qs.filter(item_id=v) if v else qs, type='select',
+               options=lambda r: [(i.pk, i.name) for i in scoped_queryset(InventoryItem, r.user).order_by('name')],
+               all_label='All Items'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Transactions', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Purchased', 'value': qs.filter(transaction_type='PURCHASE').aggregate(
+                t=Coalesce(Sum(F('quantity') * F('unit_cost')), 0, output_field=DecimalField()))['t'],
+             'icon': 'money', 'color': 'blue'},
+            {'label': 'Usage Entries', 'value': qs.filter(transaction_type='USAGE').count(), 'icon': 'tag', 'color': 'amber'},
+            {'label': 'This Month', 'value': qs.filter(transaction_type='PURCHASE', **month).aggregate(
+                t=Coalesce(Sum(F('quantity') * F('unit_cost')), 0, output_field=DecimalField()))['t'],
+             'icon': 'clock', 'color': 'teal'},
+        ])
+
+
+def _inventory_alert_list(request, app, model):
+    from inventory.models import InventoryAlert
+    qs = scoped_queryset(InventoryAlert, request.user,
+                         InventoryAlert.objects.select_related('item'))
+    columns = [
+        {'key': 'created', 'label': 'Raised'},
+        {'key': 'item', 'label': 'Item'},
+        {'key': 'message', 'label': 'Message'},
+        {'key': 'status', 'label': 'Status'},
+    ]
+    def row(a):
+        return {
+            'created': a.created_at.date(),
+            'item': a.item.name,
+            'message': a.message,
+            'status': _pill('Resolved', 'green') if a.is_resolved else _pill('Open', 'red'),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('is_resolved', '-created_at'),
+        title='Stock Alerts', table_title='Inventory Alerts',
+        subtitle='Low-stock and stock movement warnings across your inventory.',
+        nav='inventoryalert', columns=columns, row_fn=row, section='Operations',
+        create_label='Add Alert',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('item__name', 'message'), placeholder='Item or message...'),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(is_resolved=(v == '1')) if v else qs, type='select',
+               options=[('0', 'Open'), ('1', 'Resolved')]),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Alerts', 'value': qs.count(), 'icon': 'alert', 'color': 'green'},
+            {'label': 'Open', 'value': qs.filter(is_resolved=False).count(), 'icon': 'alert', 'color': 'red'},
+            {'label': 'Resolved', 'value': qs.filter(is_resolved=True).count(), 'icon': 'check', 'color': 'teal'},
+        ])
+
+
+def _task_list(request, app, model):
+    from fields.models import Field
+    from labor.models import Task, Worker
+    today = datetime.date.today()
+    qs = scoped_queryset(Task, request.user,
+                         Task.objects.prefetch_related('workers')
+                              .select_related('field', 'crop_season', 'crop_season__crop'))
+    columns = [
+        {'key': 'task', 'label': 'Task'},
+        {'key': 'workers', 'label': 'Assigned To'},
+        {'key': 'field', 'label': 'Field'},
+        {'key': 'season', 'label': 'Season'},
+        {'key': 'window', 'label': 'Window'},
+        {'key': 'status', 'label': 'Status'},
+    ]
+    def row(t):
+        window = ''
+        if t.start_date and t.end_date:
+            window = f'{t.start_date} → {t.end_date}'
+        elif t.start_date:
+            window = f'from {t.start_date}'
+        elif t.end_date:
+            window = f'by {t.end_date}'
+        return {
+            'task': _main(t.name, t.description[:60]),
+            'workers': ', '.join(w.name for w in t.workers.all()),
+            'field': t.field.name if t.field_id else '',
+            'season': str(t.crop_season) if t.crop_season_id else '',
+            'window': window,
+            'status': _status_pill(
+                t.status, t.get_status_display()),
+            'actions': ([{'label': 'Start', 'url': reverse('task_advance', args=[t.pk])}]
+                        if t.status == 'ASSIGNED'
+                        else [{'label': 'Complete', 'url': reverse('task_advance', args=[t.pk])}]
+                        if t.status == 'IN_PROGRESS' else []),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-start_date', 'name'),
+        title='Tasks', table_title='Work Assignments',
+        subtitle='Farm work assigned to crews — linked to fields and crop seasons.',
+        nav='task', columns=columns, row_fn=row, section='Operations',
+        create_label='Add Task',
+        filter_specs=[
+            _f('q', 'Search',
+               lambda qs, v: _q_filter('name', 'description', 'workers__name')(qs, v).distinct(),
+               placeholder='Task or worker...'),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(status=v) if v else qs, type='select',
+               options=Task.TaskStatus.choices),
+            _f('worker', 'Worker',
+               lambda qs, v: qs.filter(workers__pk=v).distinct() if v else qs, type='select',
+               options=lambda r: [(w.pk, w.name) for w in scoped_queryset(Worker, r.user).order_by('name')],
+               all_label='All Workers'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Tasks', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'In Progress', 'value': qs.filter(status='IN_PROGRESS').count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Completed', 'value': qs.filter(status='COMPLETED').count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Overdue', 'value': qs.filter(end_date__lt=today).exclude(status__in=('COMPLETED', 'CANCELLED')).count(), 'icon': 'alert', 'color': 'red'},
+        ])
+
+
+def _attendance_list(request, app, model):
+    from labor.models import AttendanceRecord, Worker
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    qs = scoped_queryset(AttendanceRecord, request.user,
+                         AttendanceRecord.objects.select_related('worker', 'task'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'worker', 'label': 'Worker'},
+        {'key': 'task', 'label': 'Task'},
+        {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+        {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
+        {'key': 'pay', 'label': 'Pay', 'class': 'num'},
+    ]
+    def row(r):
+        return {
+            'date': r.date,
+            'worker': r.worker.name,
+            'task': r.task.name if r.task_id else '',
+            'hours': f'{r.hours}h',
+            'ot': f'{r.overtime_hours}h' if r.overtime_hours else '',
+            'pay': _money(r.total_pay),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date'),
+        title='Attendance', table_title='Daily Attendance',
+        subtitle='Hours worked per worker, with overtime and pay at the agreed rate.',
+        nav='attendancerecord', columns=columns, row_fn=row, section='Operations',
+        create_label='Log Attendance',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('worker__name', 'task__name', 'notes'), placeholder='Worker or task...'),
+            _f('worker', 'Worker',
+               lambda qs, v: qs.filter(worker_id=v) if v else qs, type='select',
+               options=lambda r: [(w.pk, w.name) for w in scoped_queryset(Worker, r.user).order_by('name')],
+               all_label='All Workers'),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Records', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Hours Logged', 'value': f"{qs.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
+            {'label': 'Overtime', 'value': f"{qs.aggregate(t=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Month Pay', 'value': qs.filter(**month).aggregate(
+                t=Coalesce(Sum(F('hours') * F('worker__hourly_rate'))
+                           + Sum(F('overtime_hours') * F('worker__hourly_rate')) * 2,
+                           0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'teal'},
+        ])
+
+
+def _payroll_list(request, app, model):
+    from labor.models import PayrollRun
+    qs = scoped_queryset(PayrollRun, request.user, PayrollRun.objects.all())
+    columns = [
+        {'key': 'period', 'label': 'Pay Period'},
+        {'key': 'status', 'label': 'Status'},
+        {'key': 'total', 'label': 'Total', 'class': 'num'},
+        {'key': 'created', 'label': 'Created'},
+    ]
+    def row(p):
+        return {
+            'period': _main(f'{p.start_date} → {p.end_date}'),
+            'status': _status_pill(p.status, p.get_status_display()),
+            'total': _money(p.total_amount),
+            'created': p.created_at.date(),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-start_date'),
+        title='Payroll', table_title='Payroll Runs',
+        subtitle='Payroll periods and totals paid out to workers.',
+        nav='payrollrun', columns=columns, row_fn=row, section='Operations',
+        create_label='New Payroll Run',
+        filter_specs=[
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(status=v) if v else qs, type='select',
+               options=PayrollRun.PayrollStatus.choices),
+            _f('date_from', 'From', lambda qs, v: qs.filter(start_date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(start_date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Payroll Runs', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Pending', 'value': qs.filter(status='PENDING').count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Paid Out', 'value': qs.filter(status='COMPLETED').aggregate(
+                t=Coalesce(Sum('total_amount'), 0, output_field=DecimalField()))['t'],
+             'icon': 'money', 'color': 'teal'},
+        ])
+
+
+# -- Finance section pages ------------------------------------------------------
+
+def _schedule_line_list(request, app, model):
+    from expenses.models import ScheduleLine
+    qs = ScheduleLine.objects.select_related('subcode').annotate(
+        code_count=Count('budget_codes', distinct=True))
+    columns = [
+        {'key': 'code', 'label': 'Code'},
+        {'key': 'name', 'label': 'Schedule Line'},
+        {'key': 'subcode', 'label': 'Linked Subcode'},
+        {'key': 'used', 'label': 'Budget Codes', 'class': 'num'},
+        {'key': 'description', 'label': 'Description'},
+    ]
+    def row(s):
+        return {
+            'code': _main(s.code),
+            'name': s.name,
+            'subcode': str(s.subcode) if s.subcode_id else '',
+            'used': s.code_count,
+            'description': s.description[:80],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('code'),
+        title='Budget Schedule Lines', table_title='Schedule Lines',
+        subtitle='The chart of budget line items income and expenses map to.',
+        nav='scheduleline', columns=columns, row_fn=row, section='Finance',
+        create_label='Add Schedule Line',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('code', 'name', 'description'), placeholder='Code or name...'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Schedule Lines', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Linked to Subcodes', 'value': qs.filter(subcode__isnull=False).count(), 'icon': 'tag', 'color': 'blue'},
+        ])
+
+
+def _budget_subcode_list(request, app, model):
+    from expenses.models import BudgetSubCode, Category
+    qs = BudgetSubCode.objects.select_related('category')
+    columns = [
+        {'key': 'category', 'label': 'Budget Code'},
+        {'key': 'code', 'label': 'Code'},
+        {'key': 'name', 'label': 'Subcode'},
+        {'key': 'description', 'label': 'Description'},
+    ]
+    def row(s):
+        return {
+            'category': _main(str(s.category)),
+            'code': s.code,
+            'name': s.name,
+            'description': s.description[:80],
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('category__name', 'code'),
+        title='Budget Subcodes', table_title='Subcodes',
+        subtitle='Sub-classifications under each budget code.',
+        nav='budgetsubcode', columns=columns, row_fn=row, section='Finance',
+        create_label='Add Subcode',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('code', 'name', 'description'), placeholder='Code or name...'),
+            _f('category', 'Budget Code',
+               lambda qs, v: qs.filter(category_id=v) if v else qs, type='select',
+               options=lambda r: [(c.pk, str(c)) for c in Category.objects.order_by('name')],
+               all_label='All Codes'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Subcodes', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Budget Codes', 'value': qs.values('category_id').distinct().count(), 'icon': 'tag', 'color': 'blue'},
+        ])
+
+
+def _income_plan_list(request, app, model):
+    from budgets.models import Budget, BudgetIncomePlan
+    qs = scoped_queryset(BudgetIncomePlan, request.user,
+                         BudgetIncomePlan.objects.select_related('budget', 'schedule_line'))
+    columns = [
+        {'key': 'budget', 'label': 'Budget'},
+        {'key': 'code', 'label': 'Code'},
+        {'key': 'name', 'label': 'Source'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'amount', 'label': 'Planned', 'class': 'num'},
+        {'key': 'fig', 'label': 'Basis'},
+    ]
+    def row(p):
+        return {
+            'budget': p.budget.name,
+            'code': p.line_code,
+            'name': _main(p.name, p.schedule_line.name if p.schedule_line_id else ''),
+            'type': _pill(p.get_funding_type_display(),
+                          {'CAPITAL': 'blue', 'LOAN': 'amber'}.get(p.funding_type, 'green')),
+            'amount': _money(p.planned_amount),
+            'fig': p.get_figure_type_display(),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('budget__name', 'funding_type', 'line_code'),
+        title='Budget Income Plans', table_title='Planned Funding',
+        subtitle='Planned capital, loans, and revenue that fund each budget.',
+        nav='budgetincomeplan', columns=columns, row_fn=row, section='Finance',
+        create_label='Add Income Plan',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('name', 'line_code', 'budget__name'), placeholder='Source or budget...'),
+            _f('budget', 'Budget',
+               lambda qs, v: qs.filter(budget_id=v) if v else qs, type='select',
+               options=lambda r: [(b.pk, b.name) for b in scoped_queryset(Budget, r.user).order_by('name')],
+               all_label='All Budgets'),
+            _f('type', 'Type',
+               lambda qs, v: qs.filter(funding_type=v) if v else qs, type='select',
+               options=BudgetIncomePlan.FundingType.choices),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Plans', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Planned Total', 'value': qs.aggregate(t=Coalesce(Sum('planned_amount'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+            {'label': 'Loans', 'value': qs.filter(funding_type='LOAN').aggregate(t=Coalesce(Sum('planned_amount'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'amber'},
+            {'label': 'Budgets', 'value': qs.values('budget_id').distinct().count(), 'icon': 'check', 'color': 'teal'},
+        ])
+
+
+def _bank_account_list(request, app, model):
+    from integrations.models import BankAccount
+    qs = scoped_queryset(BankAccount, request.user,
+                         BankAccount.objects.annotate(txn_count=Count('transactions')))
+    columns = [
+        {'key': 'name', 'label': 'Account'},
+        {'key': 'bank', 'label': 'Bank'},
+        {'key': 'number', 'label': 'Account No.'},
+        {'key': 'type', 'label': 'Type'},
+        {'key': 'txns', 'label': 'Transactions', 'class': 'num'},
+        {'key': 'status', 'label': 'Status'},
+    ]
+    def row(a):
+        return {
+            'name': _main(a.name, a.bank_name),
+            'bank': a.bank_name,
+            'number': f'…{a.account_number_last4}' if a.account_number_last4 else '',
+            'type': a.account_type.title(),
+            'txns': a.txn_count,
+            'status': _pill('Active', 'green') if a.is_active else _pill('Inactive', 'slate'),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('name'),
+        title='Bank Accounts', table_title='Connected Accounts',
+        subtitle='Bank accounts whose transactions you track and reconcile.',
+        nav='bankaccount', columns=columns, row_fn=row, section='Finance',
+        create_label='Add Account',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('name', 'bank_name'), placeholder='Account or bank...'),
+            _f('status', 'Status',
+               lambda qs, v: qs.filter(is_active=(v == '1')) if v else qs, type='select',
+               options=[('1', 'Active'), ('0', 'Inactive')]),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Accounts', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Active', 'value': qs.filter(is_active=True).count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Transactions', 'value': qs.aggregate(t=Coalesce(Sum('txn_count'), 0))['t'], 'icon': 'clock', 'color': 'blue'},
+        ])
+
+
+def _bank_txn_list(request, app, model):
+    from integrations.models import BankAccount, BankTransaction
+    qs = scoped_queryset(BankTransaction, request.user,
+                         BankTransaction.objects.select_related(
+                             'bank_account', 'matched_expense', 'matched_income'))
+    columns = [
+        {'key': 'date', 'label': 'Date'},
+        {'key': 'account', 'label': 'Account'},
+        {'key': 'description', 'label': 'Description'},
+        {'key': 'amount', 'label': 'Amount', 'class': 'num'},
+        {'key': 'match', 'label': 'Match'},
+        {'key': 'reconciled', 'label': 'Reconciled'},
+    ]
+    def row(t):
+        return {
+            'date': t.date,
+            'account': t.bank_account.name,
+            'description': t.description[:60],
+            'amount': _money(t.amount),
+            'match': (_pill('Expense', 'green') if t.matched_expense_id
+                      else _pill('Income', 'teal') if t.matched_income_id
+                      else _pill('Unmatched', 'amber')),
+            'reconciled': _pill('Yes', 'teal') if t.is_reconciled else _pill('No', 'slate'),
+        }
+    return _section_list(
+        request, app, model, queryset=qs.order_by('-date', '-id'),
+        title='Bank Transactions', table_title='Transactions',
+        subtitle='Imported bank transactions — match them to expense records.',
+        nav='banktransaction', columns=columns, row_fn=row, section='Finance',
+        create_label='Add Transaction',
+        filter_specs=[
+            _f('q', 'Search', _q_filter('description'), placeholder='Description...'),
+            _f('account', 'Account',
+               lambda qs, v: qs.filter(bank_account_id=v) if v else qs, type='select',
+               options=lambda r: [(a.pk, a.name) for a in scoped_queryset(BankAccount, r.user).order_by('name')],
+               all_label='All Accounts'),
+            _f('match', 'Match',
+               lambda qs, v: (qs.filter(matched_expense__isnull=True, matched_income__isnull=True) if v == '0'
+                              else qs.filter(Q(matched_expense__isnull=False) | Q(matched_income__isnull=False))) if v else qs,
+               type='select', options=[('1', 'Matched'), ('0', 'Unmatched')]),
+            _f('date_from', 'From', lambda qs, v: qs.filter(date__gte=v) if v else qs, type='date'),
+            _f('date_to', 'To', lambda qs, v: qs.filter(date__lte=v) if v else qs, type='date'),
+        ],
+        stats_fn=lambda qs: [
+            {'label': 'Transactions', 'value': qs.count(), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Unmatched', 'value': qs.filter(matched_expense__isnull=True, matched_income__isnull=True).count(), 'icon': 'alert', 'color': 'amber'},
+            {'label': 'Reconciled', 'value': qs.filter(is_reconciled=True).count(), 'icon': 'check', 'color': 'teal'},
+            {'label': 'Total Volume', 'value': qs.aggregate(t=Coalesce(Sum('amount'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+        ])
+
+
+# -- Record detail pages --------------------------------------------------------
+
+def _can_write(user, label):
+    """Mirror model_create's write check: superuser, or writable membership
+    for a non-catalog model."""
+    if user.is_superuser:
+        return True
+    if label in GLOBAL_CATALOGS or label == 'accounts.user':
+        return False
+    return accessible_farms(user, write_model=label).exists()
+
+
+def _record_detail(request, app, model, obj, *, title, subtitle='',
+                   nav='', stats=(), info_groups=(), tables=(), actions=(),
+                   status_pill=None, list_label=None):
+    context = {
+        'app': app, 'model': model, 'title': title, 'subtitle': subtitle,
+        'nav': nav, 'stats': stats, 'info_groups': info_groups,
+        'tables': tables, 'actions': actions, 'status_pill': status_pill,
+        'can_write': _can_write(request.user, obj._meta.label_lower),
+        'urls': _crud_urls(app, model, pk=obj.pk),
+        'list_label': list_label or title,
+    }
+    return render(request, 'dashboard/record_detail.html', context)
+
+
+def _table_rows(objects, row_fn):
+    rows = []
+    for obj in objects:
+        row = {'pk': obj.pk}
+        row.update(row_fn(obj))
+        rows.append(row)
+    return rows
+
+
+def _edit_url(app, model, pk):
+    return reverse('model_update', kwargs={'app': app, 'model': model, 'pk': pk})
+
+
+@login_required
+def field_detail_view(request, pk):
+    from crops.models import CropSeason
+    from equipment.models import EquipmentUsage
+    from fields.models import Field
+    obj = get_object_or_404(
+        scoped_queryset(Field, request.user).prefetch_related('parcels'), pk=pk)
+    seasons = scoped_queryset(CropSeason, request.user).select_related('crop').filter(field=obj).order_by('-planting_date')[:10]
+    usage = scoped_queryset(EquipmentUsage, request.user).select_related('equipment').filter(field=obj).order_by('-date')[:10]
+    parcels = list(obj.parcels.all())
+    crop_stats = list(
+        scoped_queryset(CropSeason, request.user).filter(field=obj)
+        .values('crop_id', 'crop__name', 'crop__default_unit')
+        .annotate(
+            season_count=Count('pk'),
+            harvest_count=Count('harvests', distinct=True),
+            total_harvested=Coalesce(Sum('harvests__quantity'), 0, output_field=DecimalField()),
+        ).order_by('-season_count', 'crop__name'))
+    info_groups = [{
+        'title': 'Field',
+        'rows': [
+            {'label': 'Acreage', 'value': f'{obj.acreage} ac'},
+            {'label': 'Soil Type', 'value': obj.get_soil_type_display()},
+            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
+             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
+            {'label': 'Parcels', 'value': len(parcels)},
+        ],
+    }]
+    tables = [
+        {
+            'title': 'Land Parcels',
+            'columns': [
+                {'key': 'type', 'label': 'Tenure'},
+                {'key': 'cost', 'label': 'Lease Cost', 'class': 'num'},
+                {'key': 'start', 'label': 'Start'},
+                {'key': 'end', 'label': 'End'},
+                {'key': 'owner', 'label': 'Landowner'},
+            ],
+            'rows': _table_rows(parcels, lambda p: {
+                'type': _pill(p.get_land_type_display(), 'teal' if p.land_type == 'OWNED' else 'amber'),
+                'cost': _money(p.lease_cost), 'start': p.lease_start,
+                'end': p.lease_end, 'owner': p.owner_name,
+                'view_url': reverse('landparcel_detail', args=[p.pk]),
+            }),
+            'has_actions': True,
+            'list_url': reverse('model_list', args=['fields', 'landparcel']),
+            'empty': 'No parcels on this field.',
+        },
+        {
+            'title': 'Crops Grown',
+            'columns': [
+                {'key': 'crop', 'label': 'Crop'},
+                {'key': 'seasons', 'label': 'Seasons', 'class': 'num'},
+                {'key': 'harvests', 'label': 'Harvests', 'class': 'num'},
+                {'key': 'yield', 'label': 'Total Harvested', 'class': 'num'},
+            ],
+            'rows': [
+                {
+                    'pk': c['crop_id'],
+                    'crop': _main(c['crop__name'] or 'Unspecified crop'),
+                    'seasons': c['season_count'],
+                    'harvests': c['harvest_count'],
+                    'yield': f"{c['total_harvested']} {c['crop__default_unit'] or ''}".strip(),
+                    'view_url': reverse('crop_detail', args=[c['crop_id']]) if c['crop_id'] else '',
+                } for c in crop_stats
+            ],
+            'has_actions': True,
+            'empty': 'No crops planted on this field.',
+        },
+        {
+            'title': 'Crop Seasons',
+            'columns': [
+                {'key': 'crop', 'label': 'Crop'},
+                {'key': 'planted', 'label': 'Planted'},
+                {'key': 'status', 'label': 'Status'},
+            ],
+            'rows': _table_rows(seasons, lambda s: {
+                'crop': _main(s.crop.name, f'Expected: {s.expected_yield}' if s.expected_yield else ''),
+                'planted': s.planting_date,
+                'status': _status_pill(s.status, s.get_status_display()),
+                'view_url': reverse('crop_season_detail', args=[s.pk]),
+            }),
+            'has_actions': True,
+            'list_url': reverse('model_list', args=['crops', 'cropseason']),
+            'empty': 'No crop seasons on this field.',
+        },
+        {
+            'title': 'Equipment Usage',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'equipment', 'label': 'Equipment'},
+                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+                {'key': 'description', 'label': 'Work'},
+            ],
+            'rows': _table_rows(usage, lambda u: {
+                'date': u.date, 'equipment': u.equipment.name,
+                'hours': f'{u.hours}h', 'description': u.description[:60],
+            }),
+            'empty': 'No equipment logged on this field.',
+        },
+    ]
+    return _record_detail(
+        request, 'fields', 'field', obj, title=obj.name,
+        subtitle=f'{obj.farm_profile.farm_name} field', nav='field',
+        stats=[
+            {'label': 'Acreage', 'value': f'{obj.acreage} ac', 'icon': 'layers', 'color': 'green'},
+            {'label': 'Parcels', 'value': len(parcels), 'icon': 'tag', 'color': 'blue'},
+            {'label': 'Crop Seasons', 'value': obj.crop_seasons.count(), 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Crops Grown', 'value': len(crop_stats), 'icon': 'layers', 'color': 'teal'},
+            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive', 'icon': 'check', 'color': 'teal' if obj.is_active else 'red'},
+        ],
+        info_groups=info_groups, tables=tables, list_label='Fields')
+
+
+@login_required
+def landparcel_detail_view(request, pk):
+    from fields.models import LandParcel
+    today = datetime.date.today()
+    obj = get_object_or_404(
+        scoped_queryset(LandParcel, request.user).select_related('field', 'field__farm_profile'), pk=pk)
+    if obj.land_type == 'OWNED':
+        lease_status = {'text': 'Owned', 'pill': 'teal'}
+    elif obj.lease_end and obj.lease_end < today:
+        lease_status = {'text': 'Lease Expired', 'pill': 'red'}
+    elif obj.lease_end and (obj.lease_end - today).days <= 60:
+        lease_status = {'text': 'Lease Expiring', 'pill': 'amber'}
+    else:
+        lease_status = {'text': 'Active Lease', 'pill': 'green'}
+    info_groups = [{
+        'title': 'Parcel',
+        'rows': [
+            {'label': 'Field', 'value': obj.field.name},
+            {'label': 'Tenure', 'value': obj.get_land_type_display()},
+            {'label': 'Status', 'value': lease_status['text'], 'kind': 'pill', 'pill': lease_status['pill']},
+            {'label': 'Lease Cost', 'value': obj.lease_cost, 'kind': 'money'},
+            {'label': 'Lease Start', 'value': obj.lease_start},
+            {'label': 'Lease End', 'value': obj.lease_end},
+            {'label': 'Landowner', 'value': obj.owner_name},
+        ],
+    }]
+    return _record_detail(
+        request, 'fields', 'landparcel', obj,
+        title=f'{obj.field.name} parcel', subtitle=obj.field.farm_profile.farm_name,
+        nav='landparcel',
+        status_pill={'text': lease_status['text'], 'color': lease_status['pill']},
+        info_groups=info_groups,
+        tables=[], list_label='Land Parcels')
+
+
+@login_required
+def equipment_detail_view(request, pk):
+    from equipment.models import Equipment
+    obj = get_object_or_404(
+        scoped_queryset(Equipment, request.user), pk=pk)
+    maint = obj.maintenance_logs.order_by('-date')[:10]
+    usage = obj.usage_records.select_related('field', 'crop_season', 'crop_season__crop').order_by('-date')[:10]
+    info_groups = [{
+        'title': 'Equipment',
+        'rows': [
+            {'label': 'Type', 'value': obj.get_equipment_type_display()},
+            {'label': 'Purchase Date', 'value': obj.purchase_date},
+            {'label': 'Purchase Cost', 'value': obj.purchase_cost, 'kind': 'money'},
+            {'label': 'Current Value', 'value': obj.current_value, 'kind': 'money'},
+            {'label': 'Depreciation', 'value': obj.depreciation, 'kind': 'money'},
+            {'label': 'Cost / Hour', 'value': obj.cost_per_hour, 'kind': 'money'},
+            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
+             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
+        ],
+    }]
+    tables = [
+        {
+            'title': 'Maintenance History',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'description', 'label': 'Work Done'},
+                {'key': 'by', 'label': 'Performed By'},
+                {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+            ],
+            'rows': _table_rows(maint, lambda l: {
+                'date': l.date, 'description': l.description[:80],
+                'by': l.performed_by, 'cost': _money(l.cost),
+            }),
+            'list_url': reverse('model_list', args=['equipment', 'maintenancelog']),
+            'empty': 'No maintenance logged.',
+        },
+        {
+            'title': 'Usage Log',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'field', 'label': 'Field'},
+                {'key': 'season', 'label': 'Season'},
+                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+            ],
+            'rows': _table_rows(usage, lambda u: {
+                'date': u.date,
+                'field': u.field.name if u.field_id else '',
+                'season': str(u.crop_season) if u.crop_season_id else '',
+                'hours': f'{u.hours}h',
+            }),
+            'list_url': reverse('model_list', args=['equipment', 'equipmentusage']),
+            'empty': 'No usage logged.',
+        },
+    ]
+    return _record_detail(
+        request, 'equipment', 'equipment', obj, title=obj.name,
+        subtitle=f'{obj.farm_profile.farm_name} equipment', nav='equipment',
+        stats=[
+            {'label': 'Hours Used', 'value': f'{obj.hours_used}h', 'icon': 'clock', 'color': 'green'},
+            {'label': 'Maintenance Spend', 'value': obj.total_maintenance_cost, 'icon': 'money', 'color': 'blue'},
+            {'label': 'Service Logs', 'value': obj.maintenance_logs.count(), 'icon': 'layers', 'color': 'amber'},
+            {'label': 'Cost / Hour', 'value': obj.cost_per_hour, 'icon': 'money', 'color': 'teal'},
+        ],
+        info_groups=info_groups, tables=tables, list_label='Equipment')
+
+
+@login_required
+def inventory_item_detail_view(request, pk):
+    from inventory.models import InventoryItem
+    obj = get_object_or_404(
+        scoped_queryset(InventoryItem, request.user), pk=pk)
+    txns = obj.transactions.select_related('budget_item').order_by('-date', '-created_at')[:15]
+    alerts = obj.alerts.order_by('-created_at')[:10]
+    info_groups = [{
+        'title': 'Item',
+        'rows': [
+            {'label': 'Unit', 'value': obj.unit},
+            {'label': 'On Hand', 'value': f'{obj.quantity_on_hand} {obj.unit}'},
+            {'label': 'Reorder Threshold', 'value': f'{obj.reorder_threshold} {obj.unit}'},
+            {'label': 'Stock Status', 'value': 'Low Stock' if obj.is_low_stock else 'In Stock',
+             'kind': 'pill', 'pill': 'red' if obj.is_low_stock else 'green'},
+            {'label': 'Cost / Unit', 'value': obj.cost_per_unit, 'kind': 'money'},
+            {'label': 'Supplier', 'value': obj.supplier},
+        ],
+    }]
+    tables = [
+        {
+            'title': 'Stock Transactions',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'type', 'label': 'Type'},
+                {'key': 'qty', 'label': 'Qty', 'class': 'num'},
+                {'key': 'unit_cost', 'label': 'Unit Cost', 'class': 'num'},
+                {'key': 'notes', 'label': 'Notes'},
+            ],
+            'rows': _table_rows(txns, lambda t: {
+                'date': t.date,
+                'type': _pill(t.get_transaction_type_display(),
+                              {'PURCHASE': 'green', 'USAGE': 'amber'}.get(t.transaction_type, 'slate')),
+                'qty': f'{t.quantity} {obj.unit}',
+                'unit_cost': _money(t.unit_cost), 'notes': t.notes[:60],
+            }),
+            'list_url': reverse('model_list', args=['inventory', 'inventorytransaction']),
+            'empty': 'No stock movements.',
+        },
+        {
+            'title': 'Alerts',
+            'columns': [
+                {'key': 'created', 'label': 'Raised'},
+                {'key': 'message', 'label': 'Message'},
+                {'key': 'status', 'label': 'Status'},
+            ],
+            'rows': _table_rows(alerts, lambda a: {
+                'created': a.created_at.date(), 'message': a.message,
+                'status': _pill('Resolved', 'green') if a.is_resolved else _pill('Open', 'red'),
+            }),
+            'list_url': reverse('model_list', args=['inventory', 'inventoryalert']),
+            'empty': 'No alerts for this item.',
+        },
+    ]
+    return _record_detail(
+        request, 'inventory', 'inventoryitem', obj, title=obj.name,
+        subtitle=f'{obj.farm_profile.farm_name} inventory', nav='inventoryitem',
+        status_pill={'text': 'Low Stock', 'color': 'red'} if obj.is_low_stock
+        else {'text': 'In Stock', 'color': 'green'},
+        stats=[
+            {'label': 'On Hand', 'value': f'{obj.quantity_on_hand} {obj.unit}', 'icon': 'layers', 'color': 'green'},
+            {'label': 'Stock Value', 'value': obj.quantity_on_hand * obj.cost_per_unit, 'icon': 'money', 'color': 'blue'},
+            {'label': 'Open Alerts', 'value': obj.alerts.filter(is_resolved=False).count(), 'icon': 'alert', 'color': 'red'},
+            {'label': 'Transactions', 'value': obj.transactions.count(), 'icon': 'clock', 'color': 'teal'},
+        ],
+        info_groups=info_groups, tables=tables, list_label='Inventory')
+
+
+@login_required
+def worker_detail_view(request, pk):
+    from labor.models import Worker
+    obj = get_object_or_404(
+        scoped_queryset(Worker, request.user).prefetch_related('tasks'), pk=pk)
+    attendance = obj.attendance_records.select_related('task').order_by('-date')[:15]
+    tasks = list(obj.tasks.order_by('-start_date')[:10])
+    today = datetime.date.today()
+    month = {'date__year': today.year, 'date__month': today.month}
+    info_groups = [{
+        'title': 'Worker',
+        'rows': [
+            {'label': 'Hourly Rate', 'value': obj.hourly_rate, 'kind': 'money'},
+            {'label': 'Phone', 'value': obj.phone},
+            {'label': 'Tax ID', 'value': obj.tax_id},
+            {'label': 'Linked User', 'value': obj.user.username if obj.user_id else ''},
+            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
+             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
+        ],
+    }]
+    tables = [
+        {
+            'title': 'Attendance',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'task', 'label': 'Task'},
+                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+                {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
+                {'key': 'pay', 'label': 'Pay', 'class': 'num'},
+            ],
+            'rows': _table_rows(attendance, lambda r: {
+                'date': r.date, 'task': r.task.name if r.task_id else '',
+                'hours': f'{r.hours}h', 'ot': f'{r.overtime_hours}h' if r.overtime_hours else '',
+                'pay': _money(r.total_pay),
+            }),
+            'list_url': reverse('model_list', args=['labor', 'attendancerecord']),
+            'empty': 'No attendance logged.',
+        },
+        {
+            'title': 'Tasks',
+            'columns': [
+                {'key': 'name', 'label': 'Task'},
+                {'key': 'window', 'label': 'Window'},
+                {'key': 'status', 'label': 'Status'},
+            ],
+            'rows': _table_rows(tasks, lambda t: {
+                'name': t.name,
+                'window': f'{t.start_date} → {t.end_date}' if t.start_date and t.end_date else '',
+                'status': _status_pill(t.status, t.get_status_display()),
+                'view_url': reverse('task_detail', args=[t.pk]),
+            }),
+            'has_actions': True,
+            'list_url': reverse('model_list', args=['labor', 'task']),
+            'empty': 'No tasks assigned.',
+        },
+    ]
+    month_attendance = obj.attendance_records.filter(**month)
+    return _record_detail(
+        request, 'labor', 'worker', obj, title=obj.name,
+        subtitle=f'{obj.farm_profile.farm_name} worker', nav='worker',
+        stats=[
+            {'label': 'Hourly Rate', 'value': obj.hourly_rate, 'icon': 'money', 'color': 'green'},
+            {'label': 'Month Hours', 'value': f"{month_attendance.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
+            {'label': 'Month Overtime', 'value': f"{month_attendance.aggregate(t=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Tasks', 'value': obj.tasks.count(), 'icon': 'check', 'color': 'teal'},
+        ],
+        info_groups=info_groups, tables=tables, list_label='Workers')
+
+
+@login_required
+def task_detail_view(request, pk):
+    from labor.models import Task
+    obj = get_object_or_404(
+        scoped_queryset(Task, request.user).prefetch_related('workers')
+            .select_related('field', 'crop_season', 'crop_season__crop'), pk=pk)
+    workers = list(obj.workers.all())
+    attendance = obj.attendance_records.select_related('worker').order_by('-date')[:15]
+    actions = []
+    if obj.status in ('ASSIGNED', 'IN_PROGRESS'):
+        label = 'Start Task' if obj.status == 'ASSIGNED' else 'Mark Complete'
+        actions.append({'label': label, 'url': reverse('task_advance', args=[obj.pk]),
+                        'method': 'post'})
+    info_groups = [{
+        'title': 'Task',
+        'rows': [
+            {'label': 'Status', 'value': obj.get_status_display(), 'kind': 'pill',
+             'pill': _LIVESTOCK_PILL.get(obj.status, 'slate')},
+            {'label': 'Assigned To', 'value': ', '.join(w.name for w in workers) or '-'},
+            {'label': 'Field', 'value': obj.field.name if obj.field_id else ''},
+            {'label': 'Crop Season', 'value': str(obj.crop_season) if obj.crop_season_id else ''},
+            {'label': 'Start Date', 'value': obj.start_date},
+            {'label': 'End Date', 'value': obj.end_date},
+            {'label': 'Description', 'value': obj.description},
+        ],
+    }]
+    tables = [{
+        'title': 'Attendance on this Task',
+        'columns': [
+            {'key': 'date', 'label': 'Date'},
+            {'key': 'worker', 'label': 'Worker'},
+            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+            {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
+            {'key': 'pay', 'label': 'Pay', 'class': 'num'},
+        ],
+        'rows': _table_rows(attendance, lambda r: {
+            'date': r.date, 'worker': r.worker.name,
+            'hours': f'{r.hours}h', 'ot': f'{r.overtime_hours}h' if r.overtime_hours else '',
+            'pay': _money(r.total_pay),
+        }),
+        'empty': 'No attendance logged against this task.',
+    }]
+    return _record_detail(
+        request, 'labor', 'task', obj, title=obj.name,
+        subtitle='Work assignment', nav='task',
+        stats=[
+            {'label': 'Workers', 'value': len(workers), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Hours Logged', 'value': f"{obj.attendance_records.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
+            {'label': 'Status', 'value': obj.get_status_display(), 'icon': 'check',
+             'color': 'green' if obj.status == 'COMPLETED' else 'amber'},
+        ],
+        info_groups=info_groups, tables=tables, actions=actions, list_label='Tasks')
+
+
+@login_required
+def payroll_run_detail_view(request, pk):
+    from labor.models import PayrollRun
+    obj = get_object_or_404(
+        scoped_queryset(PayrollRun, request.user).prefetch_related('lines__worker'), pk=pk)
+    lines = list(obj.lines.all())
+    actions = []
+    if obj.status != 'COMPLETED':
+        actions.append({'label': 'Generate from Attendance',
+                        'url': reverse('payroll_generate', args=[obj.pk]), 'method': 'post'})
+    if obj.status == 'PENDING' and lines:
+        actions.append({'label': 'Mark Completed',
+                        'url': reverse('payroll_complete', args=[obj.pk]), 'method': 'post',
+                        'confirm': 'Mark this payroll run as completed?'})
+    info_groups = [{
+        'title': 'Payroll Run',
+        'rows': [
+            {'label': 'Period', 'value': f'{obj.start_date} → {obj.end_date}'},
+            {'label': 'Status', 'value': obj.get_status_display(), 'kind': 'pill',
+             'pill': _LIVESTOCK_PILL.get(obj.status, 'slate')},
+            {'label': 'Total', 'value': obj.total_amount, 'kind': 'money'},
+            {'label': 'Created', 'value': obj.created_at.date()},
+        ],
+    }]
+    tables = [{
+        'title': 'Payroll Lines',
+        'columns': [
+            {'key': 'worker', 'label': 'Worker'},
+            {'key': 'rate', 'label': 'Rate', 'class': 'num'},
+            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+            {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
+            {'key': 'amount', 'label': 'Amount', 'class': 'num'},
+        ],
+        'rows': _table_rows(lines, lambda l: {
+            'worker': _main(l.worker.name),
+            'rate': _money(l.worker.hourly_rate),
+            'hours': f'{l.hours}h', 'ot': f'{l.overtime_hours}h' if l.overtime_hours else '',
+            'amount': _money(l.amount),
+        }),
+        'empty': 'No lines yet — generate them from attendance.',
+    }]
+    return _record_detail(
+        request, 'labor', 'payrollrun', obj,
+        title=f'Payroll {obj.start_date} → {obj.end_date}',
+        subtitle=f'{obj.farm_profile.farm_name} payroll', nav='payrollrun',
+        status_pill={'text': obj.get_status_display(),
+                     'color': _LIVESTOCK_PILL.get(obj.status, 'slate')},
+        stats=[
+            {'label': 'Workers Paid', 'value': len(lines), 'icon': 'layers', 'color': 'green'},
+            {'label': 'Total Hours', 'value': f"{sum(l.hours for l in lines)}h", 'icon': 'clock', 'color': 'blue'},
+            {'label': 'Overtime', 'value': f"{sum(l.overtime_hours for l in lines)}h", 'icon': 'clock', 'color': 'amber'},
+            {'label': 'Total Amount', 'value': obj.total_amount, 'icon': 'money', 'color': 'teal'},
+        ],
+        info_groups=info_groups, tables=tables, actions=actions, list_label='Payroll')
+
+
+@login_required
+def payroll_generate_view(request, pk):
+    from labor.models import PayrollRun
+    if request.method != 'POST':
+        raise Http404
+    obj = get_object_or_404(scoped_queryset(PayrollRun, request.user, write=True), pk=pk)
+    obj.generate_from_attendance()
+    return HttpResponseRedirect(request.META.get('HTTP_REFERER')
+                                or reverse('payrollrun_detail', args=[pk]))
+
+
+@login_required
+def payroll_complete_view(request, pk):
+    from labor.models import PayrollRun
+    if request.method != 'POST':
+        raise Http404
+    obj = get_object_or_404(scoped_queryset(PayrollRun, request.user, write=True), pk=pk)
+    if obj.status != PayrollRun.PayrollStatus.COMPLETED:
+        obj.status = PayrollRun.PayrollStatus.COMPLETED
+        obj.save(update_fields=['status', 'updated_at'])
+    return HttpResponseRedirect(request.META.get('HTTP_REFERER')
+                                or reverse('payrollrun_detail', args=[pk]))
+
+
+@login_required
+def task_advance_view(request, pk):
+    from labor.models import Task
+    if request.method != 'POST':
+        raise Http404
+    obj = get_object_or_404(scoped_queryset(Task, request.user, write=True), pk=pk)
+    next_status = {'ASSIGNED': 'IN_PROGRESS', 'IN_PROGRESS': 'COMPLETED'}.get(obj.status)
+    if next_status:
+        obj.status = next_status
+        obj.save(update_fields=['status', 'updated_at'])
+    return HttpResponseRedirect(request.META.get('HTTP_REFERER')
+                                or reverse('task_detail', args=[pk]))
+
+
+@login_required
+def animal_record_detail_view(request, pk):
+    from livestock.models import AnimalRecord, BreedingRecord
+    obj = get_object_or_404(
+        scoped_queryset(AnimalRecord, request.user).select_related('species', 'group'), pk=pk)
+    health = obj.health_records.order_by('-date')[:10]
+    breeding_qs = scoped_queryset(BreedingRecord, request.user).filter(
+        Q(dam=obj) | Q(sire=obj)).order_by('-mating_date')
+    breeding = breeding_qs[:10]
+    info_groups = [{
+        'title': 'Animal',
+        'rows': [
+            {'label': 'Tag', 'value': obj.tag_number},
+            {'label': 'Species', 'value': obj.species.name},
+            {'label': 'Group', 'value': obj.group.name if obj.group_id else ''},
+            {'label': 'Gender', 'value': obj.get_gender_display()},
+            {'label': 'Weight', 'value': f'{obj.current_weight_kg} kg' if obj.current_weight_kg else ''},
+            {'label': 'Acquisition Cost', 'value': obj.acquisition_cost, 'kind': 'money'},
+            {'label': 'Health', 'value': obj.get_health_status_display(), 'kind': 'pill',
+             'pill': _LIVESTOCK_PILL.get(obj.health_status, 'slate')},
+            {'label': 'Status', 'value': 'Sold' if obj.is_sold else 'On Farm', 'kind': 'pill',
+             'pill': 'blue' if obj.is_sold else 'green'},
+        ],
+    }]
+    tables = [
+        {
+            'title': 'Health Records',
+            'columns': [
+                {'key': 'date', 'label': 'Date'},
+                {'key': 'type', 'label': 'Type'},
+                {'key': 'description', 'label': 'Description'},
+                {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+            ],
+            'rows': _table_rows(health, lambda h: {
+                'date': h.date, 'type': h.get_record_type_display(),
+                'description': h.description[:60], 'cost': _money(h.cost),
+            }),
+            'list_url': reverse('model_list', args=['livestock', 'animalhealthrecord']),
+            'empty': 'No health records.',
+        },
+        {
+            'title': 'Breeding Records',
+            'columns': [
+                {'key': 'date', 'label': 'Bred'},
+                {'key': 'status', 'label': 'Status'},
+                {'key': 'offspring', 'label': 'Offspring', 'class': 'num'},
+            ],
+            'rows': _table_rows(breeding, lambda b: {
+                'date': b.mating_date,
+                'status': _status_pill(b.status, b.get_status_display()),
+                'offspring': b.offspring_count,
+            }),
+            'list_url': reverse('model_list', args=['livestock', 'breedingrecord']),
+            'empty': 'No breeding records.',
+        },
+    ]
+    return _record_detail(
+        request, 'livestock', 'animalrecord', obj,
+        title=obj.name or obj.tag_number,
+        subtitle=f'{obj.species.name} · {obj.farm_profile.farm_name}',
+        nav='animalrecord',
+        status_pill={'text': obj.get_health_status_display(),
+                     'color': _LIVESTOCK_PILL.get(obj.health_status, 'slate')},
+        stats=[
+            {'label': 'Health Records', 'value': obj.health_records.count(), 'icon': 'heart', 'color': 'green'},
+            {'label': 'Vet Spend', 'value': obj.health_records.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
+            {'label': 'Breeding Records', 'value': breeding_qs.count(), 'icon': 'layers', 'color': 'amber'},
+        ],
+        info_groups=info_groups, tables=tables, list_label='Animal Records')
 
 
 @login_required
 def model_list(request, app, model):
+    if (app, model) == ('livestock', 'animalspecies'):
+        return _animal_species_list(request, app, model)
+    if (app, model) == ('livestock', 'animalgroup'):
+        return _animal_group_list(request, app, model)
+    if (app, model) == ('livestock', 'animalrecord'):
+        return _animal_record_list(request, app, model)
+    if (app, model) == ('livestock', 'animalhealthrecord'):
+        return _health_record_list(request, app, model)
+    if (app, model) == ('livestock', 'breedingrecord'):
+        return _breeding_list(request, app, model)
+    if (app, model) == ('livestock', 'animalfeedlog'):
+        return _feed_log_list(request, app, model)
+    if (app, model) == ('livestock', 'milkproductionrecord'):
+        return _milk_list(request, app, model)
+    if (app, model) == ('livestock', 'poultrybatch'):
+        return _poultry_batch_list(request, app, model)
+    if (app, model) == ('livestock', 'eggproductionrecord'):
+        return _egg_list(request, app, model)
+    if (app, model) == ('livestock', 'poultryfeedlog'):
+        return _poultry_feed_list(request, app, model)
+    if (app, model) == ('livestock', 'poultryhealthrecord'):
+        return _poultry_health_list(request, app, model)
+    if (app, model) == ('fields', 'landparcel'):
+        return _land_parcel_list(request, app, model)
+    if (app, model) == ('equipment', 'maintenancelog'):
+        return _maintenance_list(request, app, model)
+    if (app, model) == ('equipment', 'equipmentusage'):
+        return _equipment_usage_list(request, app, model)
+    if (app, model) == ('inventory', 'inventorytransaction'):
+        return _stock_txn_list(request, app, model)
+    if (app, model) == ('inventory', 'inventoryalert'):
+        return _inventory_alert_list(request, app, model)
+    if (app, model) == ('labor', 'task'):
+        return _task_list(request, app, model)
+    if (app, model) == ('labor', 'attendancerecord'):
+        return _attendance_list(request, app, model)
+    if (app, model) == ('labor', 'payrollrun'):
+        return _payroll_list(request, app, model)
+    if (app, model) == ('expenses', 'scheduleline'):
+        return _schedule_line_list(request, app, model)
+    if (app, model) == ('expenses', 'budgetsubcode'):
+        return _budget_subcode_list(request, app, model)
+    if (app, model) == ('budgets', 'budgetincomeplan'):
+        return _income_plan_list(request, app, model)
+    if (app, model) == ('integrations', 'bankaccount'):
+        return _bank_account_list(request, app, model)
+    if (app, model) == ('integrations', 'banktransaction'):
+        return _bank_txn_list(request, app, model)
     if (app, model) == ('fields', 'field'):
         return _field_list(request, app, model)
     if (app, model) == ('equipment', 'equipment'):
@@ -1644,6 +3549,7 @@ def model_list(request, app, model):
         'stats': _compute_stats(app, model) if request.user.is_superuser else [],
         'is_modal': request.headers.get('X-Requested-With') == 'XMLHttpRequest' and request.GET.get('modal') == '1',
         'detail_url_name': DETAIL_URL_NAMES.get((app, model)),
+        'can_write': _can_write(request.user, model_cls._meta.label_lower),
     }
     return render(request, 'dashboard/list.html', context)
 
@@ -1668,6 +3574,28 @@ def _scope_form(form, user):
         else:
             field.queryset = scoped_queryset(related_model, user, field.queryset)
     return form
+
+
+def _field_seasons_json(user, exclude_pk=None):
+    """Field id -> list of crops already planted there, one entry per crop season.
+
+    Drives the fieldCropsPanel preview on the crop-season form so users can see
+    what a field already holds before assigning a new season to it.
+    """
+    from crops.models import CropSeason
+    seasons = (scoped_queryset(CropSeason, user)
+               .select_related('crop')
+               .order_by('-planting_date'))
+    if exclude_pk:
+        seasons = seasons.exclude(pk=exclude_pk)
+    data = {}
+    for s in seasons:
+        data.setdefault(str(s.field_id), []).append({
+            'crop': s.crop.name if s.crop_id else 'Unspecified crop',
+            'season': s.planting_date.year,
+            'status': s.get_status_display(),
+        })
+    return json.dumps(data)
 
 
 @login_required
@@ -1712,6 +3640,8 @@ def model_create(request, app, model):
         'urls': _crud_urls(app, model),
         'action': 'Create',
     }
+    if label == 'crops.cropseason':
+        context['field_seasons_json'] = _field_seasons_json(request.user)
     return render(request, 'dashboard/form.html', context)
 
 
@@ -1749,6 +3679,9 @@ def model_update(request, app, model, pk):
         'obj': obj,
         'waste': is_waste,
     }
+    if model_cls._meta.label_lower == 'crops.cropseason':
+        context['field_seasons_json'] = _field_seasons_json(
+            request.user, exclude_pk=obj.pk)
     return render(request, 'dashboard/form.html', context)
 
 
@@ -1788,7 +3721,8 @@ def farm_settings(request):
     from accounts.models import Currency, FarmMembership, User
 
     farms = accessible_farms(request.user).select_related(
-        'default_currency', 'user').order_by('farm_name')
+        'default_currency', 'user').order_by('farm_name').annotate(
+        membership_count=Count('memberships', distinct=True))
     memberships = scoped_queryset(FarmMembership, request.user).select_related(
         'farm_profile', 'user').order_by('farm_profile__farm_name', 'user__username')
     member_ids = memberships.values_list('user_id', flat=True)
@@ -1799,19 +3733,164 @@ def farm_settings(request):
         users = User.objects.filter(
             Q(pk__in=member_ids) | Q(pk__in=owner_ids)).distinct().order_by('username')
 
+    if request.user.is_superuser:
+        role_label = 'Administrator'
+    else:
+        own = next((f for f in farms if f.user_id == request.user.pk), None)
+        member = next((m for m in memberships if m.user_id == request.user.pk), None)
+        role_label = 'Owner' if own else (member.get_role_display() if member else 'No farm')
+
     context = {
         'farms': farms,
         'memberships': memberships,
         'users': users,
         'currencies': Currency.objects.order_by('code'),
-        'can_edit_farms': request.user.is_superuser or accessible_farms(
+        'role_label': role_label,
+        'can_edit_farms': request.user.is_superuser or not FarmProfile.objects.filter(
+            user=request.user).exists() or accessible_farms(
             request.user, write_model='accounts.farmprofile').exists(),
         'can_manage_team': request.user.is_superuser or accessible_farms(
             request.user, write_model='accounts.farmmembership').exists(),
         'can_manage_users': request.user.is_superuser,
         'can_manage_currencies': request.user.is_superuser,
     }
+    if request.user.is_superuser:
+        db_path = _sqlite_db_path()
+        if db_path and db_path.exists():
+            stat = db_path.stat()
+            size = stat.st_size
+            for unit in ('B', 'KB', 'MB', 'GB'):
+                if size < 1024 or unit == 'GB':
+                    break
+                size /= 1024
+            context['db_info'] = {
+                'path': db_path,
+                'size': f'{size:.1f} {unit}',
+                'modified': datetime.datetime.fromtimestamp(
+                    stat.st_mtime).strftime('%d %b %Y, %H:%M'),
+            }
     return render(request, 'dashboard/farm_settings.html', context)
+
+
+def _sqlite_db_path():
+    """Path to the SQLite database file, or None when another engine is used."""
+    from pathlib import Path
+    from django.conf import settings
+    db = settings.DATABASES['default']
+    if db['ENGINE'] != 'django.db.backends.sqlite3':
+        return None
+    return Path(db['NAME'])
+
+
+def _wal_checkpoint():
+    """Fold any write-ahead log into the main SQLite file (best effort)."""
+    import sqlite3
+    from django.db import connection, OperationalError
+    try:
+        with connection.cursor() as cur:
+            cur.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    except (OperationalError, sqlite3.Error):
+        pass
+
+
+@login_required
+def database_export(request):
+    """Download the SQLite database file (superusers only)."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    path = _sqlite_db_path()
+    if path is None or not path.exists():
+        messages.error(request, 'Database file export requires the SQLite backend.')
+        return HttpResponseRedirect(reverse('farm_settings'))
+    _wal_checkpoint()
+    stamp = timezone.localtime().strftime('%Y%m%d-%H%M%S')
+    return FileResponse(path.open('rb'), as_attachment=True,
+                        filename=f'farmledger-db-{stamp}.sqlite3')
+
+
+@login_required
+def database_import(request):
+    """Replace the SQLite database with an uploaded file (superusers only).
+
+    The upload is validated (SQLite header, integrity check, FarmLedger
+    tables), the current database is backed up under backups/, then the file
+    is swapped in atomically."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    if request.method == 'POST':
+        from pathlib import Path
+        import os
+        import shutil
+        import sqlite3
+        db_path = _sqlite_db_path()
+        if db_path is None:
+            messages.error(request, 'Database file import requires the SQLite backend.')
+            return HttpResponseRedirect(reverse('farm_settings'))
+        upload = request.FILES.get('dbfile')
+        confirm = request.POST.get('confirm')
+        stamp = timezone.localtime().strftime('%Y%m%d-%H%M%S')
+        error = None
+        if not upload:
+            error = 'Choose a database file to import.'
+        elif not confirm:
+            error = 'Tick the confirmation box before importing.'
+        elif upload.size > 512 * 1024 * 1024:
+            error = 'The file is larger than the 512 MB limit.'
+        if not error and db_path.exists():
+            backup_dir = Path(settings.BASE_DIR) / 'backups'
+            backup_dir.mkdir(exist_ok=True)
+            tmp = backup_dir / f'upload-{stamp}.sqlite3'
+            try:
+                with open(tmp, 'wb+') as sink:
+                    for chunk in upload.chunks():
+                        sink.write(chunk)
+                with open(tmp, 'rb') as probe:
+                    if probe.read(16) != b'SQLite format 3\x00':
+                        error = 'That file is not an SQLite database.'
+                if not error:
+                    con = sqlite3.connect(str(tmp))
+                    try:
+                        if con.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                            error = 'The database file failed an integrity check.'
+                        tables = {row[0] for row in con.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'")}
+                        missing = [t for t in ('django_migrations', 'accounts_user')
+                                   if t not in tables]
+                        if not error and missing:
+                            error = ('Not a FarmLedger database - missing table(s): '
+                                     + ', '.join(missing))
+                        if not error:
+                            # Fold any WAL sidecars into the file before swapping.
+                            con.execute('PRAGMA journal_mode=DELETE')
+                    finally:
+                        con.close()
+                if not error:
+                    _wal_checkpoint()
+                    backup = backup_dir / f'pre-import-{stamp}.sqlite3'
+                    shutil.copy2(db_path, backup)
+                    # Drop this thread's live connection so it reopens on the
+                    # new file. Skipped inside test transactions (close_all
+                    # would break the TestCase's atomic block).
+                    if not connections['default'].in_atomic_block:
+                        connections.close_all()
+                    for side in (f'{db_path}-wal', f'{db_path}-shm'):
+                        Path(side).unlink(missing_ok=True)
+                    os.replace(tmp, db_path)
+            except (OSError, sqlite3.Error) as exc:
+                error = f'The database file could not be imported: {exc}'
+            if error:
+                tmp.unlink(missing_ok=True)
+                messages.error(request, error)
+            else:
+                messages.success(
+                    request,
+                    f'Database imported. The previous database was kept as '
+                    f'backups/{backup.name}. Restart the dev server if anything looks stale.')
+            return HttpResponseRedirect(reverse('farm_settings') + '?tab=database')
+        if error:
+            messages.error(request, error)
+            return HttpResponseRedirect(reverse('farm_settings') + '?tab=database')
+    return HttpResponseRedirect(reverse('farm_settings'))
 
 
 DONUT_PALETTE = ['#1b4332', '#2d6a4f', '#40916c', '#52b788', '#74c69d', '#95d5b2', '#b7e4c7']
@@ -1850,26 +3929,34 @@ def _donut_segments(rows, limit=6):
             'n': sum(r.get('n', 0) for r in rest),
         })
     total = sum((r['total'] for r in top), Decimal('0'))
+    biggest = max(range(len(top)), key=lambda j: top[j]['total']) if top else -1
     cumulative = 0.0
     for i, row in enumerate(top):
         share = float(row['total'] / total * 100) if total else 0.0
         row.setdefault('label', '-')
         row['share'] = round(share, 1)
         row['color'] = DONUT_PALETTE[i % len(DONUT_PALETTE)]
-        row['dash'] = f'{share:.2f} {100 - share:.2f}'
-        row['dashoffset'] = round(25 - cumulative, 2)
+        # Small gap between arcs so neighbouring segments read as separate.
+        gap = 0.8 if share > 5 else 0.25
+        row['dash'] = f'{max(share - gap, 0):.2f} {100 - share + gap:.2f}'
+        row['dashoffset'] = round(25 - cumulative + gap / 2, 2)
 
         # External label at the segment's mid-angle (0% at 12 o'clock).
         # viewBox is "0 -4 100 50"; ring center (50, 21), label radius 26.
         mid = cumulative + share / 2.0
         rad = math.radians(mid * 3.6)
         sx, sy = math.sin(rad), math.cos(rad)
-        row['px'] = round(50 + 18.7 * sx, 2)
-        row['py'] = round(21 - 18.7 * sy, 2)
-        row['ex'] = round(50 + 23.5 * sx, 2)
-        row['ey'] = round(21 - 23.5 * sy, 2)
-        row['lx'] = round(50 + 26.5 * sx, 2)
-        row['ly'] = round(21 - 26.5 * sy + 0.8, 2)
+        # The largest segment is pulled out slightly, like an exploded pie slice.
+        ox = oy = 0.0
+        if i == biggest and len(top) > 1:
+            ox, oy = round(2.0 * sx, 2), round(-2.0 * sy, 2)
+        row['explode_x'], row['explode_y'] = ox, oy
+        row['px'] = round(50 + 18.7 * sx + ox, 2)
+        row['py'] = round(21 - 18.7 * sy + oy, 2)
+        row['ex'] = round(50 + 23.5 * sx + ox, 2)
+        row['ey'] = round(21 - 23.5 * sy + oy, 2)
+        row['lx'] = round(50 + 26.5 * sx + ox, 2)
+        row['ly'] = round(21 - 26.5 * sy + 0.8 + oy, 2)
         row['anchor'] = 'middle' if abs(sx) < 0.35 else ('start' if sx > 0 else 'end')
         row['show_label'] = share >= 4
         cumulative += share
@@ -1897,6 +3984,42 @@ def _monthly_chart(bucket_map):
     for r in rows:
         r['pct'] = float(r['value'] / max_v * 100) if max_v else 0
     return rows
+
+
+def _smooth_path(points, y_min=None, y_max=None):
+    """Catmull-Rom -> cubic Bezier SVG path through (x, y) tuples.
+
+    Control-point y values are clamped to [y_min, y_max] so the curve never
+    overshoots the plot box after a sharp spike."""
+    if len(points) < 2:
+        return f'M {points[0][0]},{points[0][1]}' if points else ''
+
+    def clamp(y):
+        if y_min is not None:
+            y = max(y, y_min)
+        if y_max is not None:
+            y = min(y, y_max)
+        return y
+
+    d = [f'M {points[0][0]},{points[0][1]}']
+    n = len(points)
+    for i in range(n - 1):
+        p0 = points[i - 1] if i else points[i]
+        p1, p2 = points[i], points[i + 1]
+        p3 = points[i + 2] if i + 2 < n else p2
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, clamp(p1[1] + (p2[1] - p0[1]) / 6))
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, clamp(p2[1] - (p3[1] - p1[1]) / 6))
+        d.append(f'C {c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]},{p2[1]}')
+    return ' '.join(d)
+
+
+def _nice_ceiling(value):
+    """Round a Decimal up to a tidy axis maximum (e.g. 65.3M -> 70M)."""
+    if value <= 0:
+        return Decimal('0')
+    mag = Decimal(10) ** (len(str(int(value))) - 1)
+    step = mag / 2 if value / mag < 5 else mag
+    return (value / step).to_integral_value(rounding='ROUND_CEILING') * step
 
 
 def _line_chart(rows):

@@ -235,12 +235,14 @@
                 <span class="today-chip">{{ today }}</span>
             </div>
             <div class="welcome-actions">
+                {% if nav_access.w_sale %}
                 <a href="javascript:void(0)" data-modal-url="/dashboard/crops/sale/new/" data-modal-title="New Sale">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                     Record Sale
                 </a>
-                <a class="secondary" href="javascript:void(0)" data-modal-url="/dashboard/expenses/expense/new/" data-modal-title="New Expense">+ New Expense</a>
-                <a class="secondary" href="javascript:void(0)" data-modal-url="/dashboard/accounts/farmprofile/new/" data-modal-title="New Farm">+ New Farm</a>
+                {% endif %}
+                {% if nav_access.w_expense %}<a class="secondary" href="javascript:void(0)" data-modal-url="/dashboard/expenses/expense/new/" data-modal-title="New Expense">+ New Expense</a>{% endif %}
+                {% if nav_access.w_farm %}<a class="secondary" href="javascript:void(0)" data-modal-url="/dashboard/accounts/farmprofile/new/" data-modal-title="New Farm">+ New Farm</a>{% endif %}
             </div>
         </section>
 
@@ -255,6 +257,7 @@
                     <div class="kpi-sub ok">{{ field_count }} fields</div>
                 </div>
             </div>
+            {% if nav_access.crops %}
             <div class="kpi-card">
                 <div class="kpi-icon amber">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -265,6 +268,8 @@
                     <div class="kpi-sub warn">{{ task_count }} open tasks</div>
                 </div>
             </div>
+            {% endif %}
+            {% if nav_access.finance %}
             <div class="kpi-card">
                 <div class="kpi-icon red">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
@@ -283,6 +288,8 @@
                     <div class="kpi-label">Total Income</div>
                 </div>
             </div>
+            {% endif %}
+            {% if nav_access.operations %}
             <div class="kpi-card">
                 <div class="kpi-icon blue">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg>
@@ -303,6 +310,7 @@
                     <div class="kpi-sub info">{{ worker_count }} workers</div>
                 </div>
             </div>
+            {% endif %}
         </div>
 
         <h3 class="section-title">
@@ -310,39 +318,52 @@
             Quick Actions
         </h3>
         <div class="quick-actions">
+            {% if nav_access.w_sale %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/crops/sale/new/" data-modal-title="New Sale">
                 <div class="qa-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="22"/><path d="M9 7c0-1.5 1.5-2.5 3-2.5s3 1 3 3c0 2.5-6 1.5-6 5 0 2 2 3 3 3s3-1 3-2.5"/></svg></div>
                 <strong>Record Sale</strong>
                 <small>Sell produce or waste</small>
             </a>
+            {% endif %}
+            {% if nav_access.w_harvest %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/crops/harvestrecord/new/" data-modal-title="New Harvest">
                 <div class="qa-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.5-3.5 8-8 8-12a8 8 0 00-16 0c0 4 2.5 8.5 8 12z"/><path d="M12 12v10"/></svg></div>
                 <strong>New Harvest</strong>
                 <small>Log a harvest record</small>
             </a>
+            {% endif %}
+            {% if nav_access.w_season %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/crops/cropseason/new/" data-modal-title="New Season">
                 <div class="qa-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
                 <strong>New Season</strong>
                 <small>Start a crop season</small>
             </a>
+            {% endif %}
+            {% if nav_access.w_expense %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/expenses/expense/new/" data-modal-title="New Expense">
                 <div class="qa-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></div>
                 <strong>New Expense</strong>
                 <small>Record a purchase</small>
             </a>
+            {% endif %}
+            {% if nav_access.w_income %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/income/income/new/" data-modal-title="New Income">
                 <div class="qa-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
                 <strong>Record Income</strong>
                 <small>Log non-sale income</small>
             </a>
+            {% endif %}
+            {% if nav_access.w_task %}
             <a class="quick-action" href="javascript:void(0)" data-modal-url="/dashboard/labor/task/new/" data-modal-title="New Task">
                 <div class="qa-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div>
                 <strong>New Task</strong>
                 <small>Assign work to crew</small>
             </a>
+            {% endif %}
         </div>
 
         <div class="dash-row">
+            {% if nav_access.finance %}
             <div class="table-card">
                 <div class="table-card-head">
                     <h3>Recent Expenses</h3>
@@ -367,9 +388,9 @@
                             <td>{{ expense.category.name|default:"-" }}</td>
                             <td class="num amount">{{ expense.amount|as_currency:currency }}</td>
                             <td class="muted" style="white-space:nowrap;">{{ expense.date }}</td>
-                            <td style="text-align:right;"><a href="javascript:void(0)" data-modal-url="/dashboard/expenses/expense/{{ expense.id }}/edit/" data-modal-title="Edit Expense" class="mini-edit" title="Edit">
+                            <td style="text-align:right;">{% if nav_access.w_expense %}<a href="javascript:void(0)" data-modal-url="/dashboard/expenses/expense/{{ expense.id }}/edit/" data-modal-title="Edit Expense" class="mini-edit" title="Edit">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                            </a></td>
+                            </a>{% endif %}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -383,7 +404,9 @@
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
 
+            {% if nav_access.crops %}
             <div class="table-card">
                 <div class="table-card-head">
                     <h3>Recent Crop Seasons</h3>
@@ -414,9 +437,11 @@
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
         </div>
 
         <div class="dash-row">
+            {% if nav_access.finance %}
             <div class="table-card">
                 <div class="table-card-head">
                     <h3>Recent Income</h3>
@@ -455,6 +480,7 @@
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
 
             <div class="table-card">
                 <div class="table-card-head">
@@ -491,16 +517,21 @@
                 <span>Farms</span>
                 <small>{{ farm_count }} profiles</small>
             </a>
+            {% if nav_access.operations %}
             <a class="module" href="/dashboard/fields/field/">
                 <div class="mod-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div>
                 <span>Fields</span>
                 <small>{{ field_count }} fields</small>
             </a>
+            {% endif %}
+            {% if nav_access.crops %}
             <a class="module" href="/dashboard/crops/cropseason/">
                 <div class="mod-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg></div>
                 <span>Crops</span>
                 <small>{{ crop_count }} seasons</small>
             </a>
+            {% endif %}
+            {% if nav_access.finance %}
             <a class="module" href="/dashboard/expenses/expense/">
                 <div class="mod-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
                 <span>Expenses</span>
@@ -511,6 +542,8 @@
                 <span>Income</span>
                 <small>Revenue records</small>
             </a>
+            {% endif %}
+            {% if nav_access.operations %}
             <a class="module" href="/dashboard/equipment/equipment/">
                 <div class="mod-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="3"/><path d="M7 17v3M17 17v3M2 12h20"/></svg></div>
                 <span>Equipment</span>
@@ -526,10 +559,13 @@
                 <span>Workers</span>
                 <small>{{ worker_count }} crew</small>
             </a>
+            {% endif %}
+            {% if nav_access.finance %}
             <a class="module" href="/dashboard/budgets/budget/">
                 <div class="mod-icon slate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg></div>
                 <span>Budgets</span>
                 <small>Plan finances</small>
             </a>
+            {% endif %}
         </div>
 {% endblock %}

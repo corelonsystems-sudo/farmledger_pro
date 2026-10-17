@@ -3,6 +3,7 @@
 {% block breadcrumbs %}<a href="{% url 'model_list' app='budgets' model='budget' %}">Budgets</a> &rsaquo; {{ budget.name }}{% endblock %}
 {% block nav_budgets %}active{% endblock %}
 {% block extra_head %}
+{% include "dashboard/svg_chart_styles.html" %}
 {% include "dashboard/list_page_styles.html" %}
 <style>
     .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
@@ -89,10 +90,10 @@
     </div>
 </header>
 <nav class="budget-tabs" role="tablist" aria-label="Budget sections">
-    <button type="button" class="budget-tab" role="tab" id="tab-budget-overview" aria-selected="true" aria-controls="budget-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</button>
-    <button type="button" class="budget-tab" role="tab" id="tab-budget-income" aria-selected="false" aria-controls="budget-income" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v12M15 8H10a2 2 0 000 4h4a2 2 0 010 4H9"/></svg>Income Sources</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-overview" aria-selected="true" aria-controls="budget-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-income" aria-selected="false" aria-controls="budget-income" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v12M15 8H10a2 2 0 000 4h4a2 2 0 010 4H9"/></svg>INCOME SOURCES</button>
     {% for centre in centres %}<button type="button" class="budget-tab" role="tab" id="tab-budget-centre-{{ forloop.counter }}" aria-selected="false" aria-controls="budget-centre-{{ forloop.counter }}" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/></svg>{{ centre.name }}</button>{% empty %}<button type="button" class="budget-tab" role="tab" id="tab-budget-expenditure-empty" aria-selected="false" aria-controls="budget-expenditure-empty" tabindex="-1">Expenditure</button>{% endfor %}
-    <button type="button" class="budget-tab" role="tab" id="tab-budget-actual" aria-selected="false" aria-controls="budget-actual" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4"/></svg>Actual Expenses</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-budget-actual" aria-selected="false" aria-controls="budget-actual" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4"/></svg>ACTUAL EXPENSES</button>
 </nav>
 <section class="budget-tab-panel" id="budget-overview" role="tabpanel" aria-labelledby="tab-budget-overview" tabindex="0">
 <div class="kpi-grid">
@@ -107,6 +108,71 @@
         <article><h3>Funding Reconciliation</h3><p><span>Total income</span><strong>{{ total_income_planned|as_currency:currency }}</strong></p><p><span>Total expenditure</span><strong>{{ total_planned|as_currency:currency }}</strong></p><p><span>{% if funding_balance < 0 %}Funding shortfall{% else %}Funding surplus{% endif %}</span><strong class="{% if funding_balance < 0 %}balance-negative{% endif %}">{{ funding_balance|as_currency:currency }}</strong></p></article>
         <article><h3>Execution Against Plan</h3><p><span>Actual expenditure</span><strong>{{ total_spent|as_currency:currency }}</strong></p><p><span>Remaining budget</span><strong>{{ remaining|as_currency:currency }}</strong></p><p><span>Burn rate</span><strong>{{ overall_pct }}%</strong></p></article>
     </div>
+    {% if burn_chart or alloc_segments %}
+    <div class="chart-duo">
+    {% if burn_chart %}
+    <article class="burn-chart">
+        <div class="burn-head">
+            <div>
+                <h3>Spend vs Plan</h3>
+                <p class="burn-sub">Expenses recorded each month, with cumulative spend tracked against the budget's straight-line spending pace.</p>
+            </div>
+            <div class="burn-stat">
+                <strong>{{ burn_chart.spent|as_currency_compact:currency }}</strong>
+                <span>{{ burn_chart.plan_pct }}% of plan spent</span>
+                {% if burn_chart.status %}<em class="pace {{ burn_chart.status.tone }}">{{ burn_chart.status.diff|as_currency_compact:currency }} {{ burn_chart.status.label }}</em>{% endif %}
+            </div>
+        </div>
+        <div class="burn-frame">
+            <svg class="burn-line" viewBox="0 0 640 236" role="img" aria-label="Cumulative actual spend versus planned spend line graph">
+                <defs>
+                    <linearGradient id="burnAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#1b4332" stop-opacity=".2"/>
+                        <stop offset="100%" stop-color="#1b4332" stop-opacity=".02"/>
+                    </linearGradient>
+                </defs>
+                {% for t in burn_chart.ticks %}
+                <line class="line-grid{% if forloop.last %} base{% endif %}" x1="72" y1="{{ t.y }}" x2="608" y2="{{ t.y }}"/>
+                <text class="axis-val" x="62" y="{{ t.y|add:'3' }}" text-anchor="end">{% if forloop.last %}0{% else %}{{ t.value|as_currency_compact:currency }}{% endif %}</text>
+                {% endfor %}
+                {% if burn_chart.today_x %}
+                <line class="today-line" x1="{{ burn_chart.today_x }}" y1="30" x2="{{ burn_chart.today_x }}" y2="190"/>
+                <text class="today-text" x="{% if burn_chart.today_anchor == 'start' %}{{ burn_chart.today_x|add:'5' }}{% else %}{{ burn_chart.today_x|add:'-5' }}{% endif %}" y="27" text-anchor="{{ burn_chart.today_anchor }}">TODAY</text>
+                {% endif %}
+                <path class="line-area" d="{{ burn_chart.area_path }}"/>
+                <path class="line-path plan" d="{{ burn_chart.plan_path }}"/>
+                <path class="line-path cumulative" d="{{ burn_chart.cumulative_path }}"/>
+                <path class="line-path actual" d="{{ burn_chart.actual_path }}"/>
+                {% for m in burn_chart.rows %}
+                {% if m.plot %}<circle class="line-point{% if m.spend %} spent{% endif %}" cx="{{ m.x }}" cy="{{ m.ay }}" r="{% if m.spend %}3.8{% else %}2.2{% endif %}"><title>{{ m.label }} — spent this month: {{ m.spend|as_currency:currency }} · cumulative: {{ m.actual|as_currency:currency }} · plan to date: {{ m.plan|as_currency:currency }}</title></circle>{% endif %}
+                {% if m.show_label %}<text class="axis-x" x="{{ m.x }}" y="212" text-anchor="middle">{{ m.label }}</text>{% endif %}
+                {% endfor %}
+                {% if burn_chart.has_actual and burn_chart.last %}
+                <circle class="end-dot" cx="{{ burn_chart.last.x }}" cy="{{ burn_chart.last.ay }}" r="5"/>
+                <text class="end-label" x="{{ burn_chart.end_label.x }}" y="{{ burn_chart.end_label.y }}" text-anchor="{{ burn_chart.end_label.anchor }}">{{ burn_chart.last.spend|as_currency_compact:currency }} in {{ burn_chart.last.label }}</text>
+                {% endif %}
+                <text class="plan-label" x="608" y="{{ burn_chart.plan_top_y|add:'-6' }}" text-anchor="end">Plan {{ total_planned|as_currency_compact:currency }}</text>
+            </svg>
+        </div>
+        <div class="burn-key">
+            <span><i class="lg-dot" style="background:#1b4332"></i>Expenses per month</span>
+            <span><i class="lg-line"></i>Cumulative spend</span>
+            <span><i class="lg-dash"></i>Planned spending pace</span>
+            <span><i class="lg-ring"></i>Month with recorded spend</span>
+        </div>
+    </article>
+    {% endif %}
+    {% if alloc_segments %}
+    <article class="alloc-chart">
+        <h3>Budget Allocation</h3>
+        <p class="burn-sub">Share of planned expenditure per budget sub-code.</p>
+        {% with cn=total_planned|as_currency_compact:currency %}
+        {% include "reports/donut.html" with segments=alloc_segments center_num=cn center_lbl="Planned Spend" %}
+        {% endwith %}
+    </article>
+    {% endif %}
+    </div>
+    {% endif %}
     {% if budget.notes %}<p class="budget-footnote">{{ budget.notes|linebreaksbr }}</p>{% endif %}
     <p class="budget-footnote">Totals use detailed lines once; activity heads are calculated summaries. Capital and loans fund the plan but are not recorded as operating sales. Actual spend comes only from linked Expense records.</p>
 </section>

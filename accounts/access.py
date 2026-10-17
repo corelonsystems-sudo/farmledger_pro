@@ -25,6 +25,7 @@ FARM_LOOKUPS = {
     'labor.task': None,
     'labor.attendancerecord': 'worker__farm_profile_id',
     'labor.payrollrun': 'farm_profile_id',
+    'labor.payrollline': 'payroll_run__farm_profile_id',
     'budgets.budget': 'farm_profile_id',
     'budgets.budgetitem': 'budget__farm_profile_id',
     'budgets.budgetincomeplan': 'budget__farm_profile_id',

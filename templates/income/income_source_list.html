@@ -27,10 +27,12 @@
         <p>Manage income categories and track totals per Schedule F line.</p>
     </div>
     <div class="page-actions">
+        {% if can_write %}
         <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Income Source">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             Add Source
         </button>
+        {% endif %}
     </div>
 </div>
 

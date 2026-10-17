@@ -37,6 +37,13 @@
         .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--red); }
         .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e2e8f0; border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .field-crops-panel { margin: -4px 0 12px; background: #f0f7f2; border: 1px solid #d8e8dd; border-radius: 8px; padding: 9px 12px; }
+        .field-crops-panel .fcp-head { font-size: 0.72rem; font-weight: 700; color: var(--primary-dark); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 5px; }
+        .field-crops-panel ul { list-style: none; margin: 0; padding: 0; }
+        .field-crops-panel li { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; padding: 3px 0; border-bottom: 1px dashed #e2e8f0; }
+        .field-crops-panel li:last-child { border-bottom: none; }
+        .field-crops-panel .fcp-status { color: var(--text-muted); font-size: 0.72rem; }
+        .field-crops-panel .fcp-empty { font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
     </style>
 </head>
 <body>
@@ -59,13 +66,59 @@
             {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
             {% if field.errors %}<ul class="errorlist">{% for e in field.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
         </div>
+        {% if field.name == 'field' and field_seasons_json %}
+        <div id="fieldCropsPanel" class="field-crops-panel" hidden>
+            <div class="fcp-head">Crops already on this field</div>
+            <ul id="fieldCropsList"></ul>
+        </div>
+        {% endif %}
         {% endfor %}
         <div class="form-actions">
             <button type="button" class="btn btn-cancel" onclick="window.parent.postMessage({close: true}, '*')">Cancel</button>
             <button type="submit" class="btn btn-primary" id="submitBtn">{{ action }} {{ model_name }}</button>
         </div>
     </form>
+    {% if field_seasons_json %}
+    <script type="application/json" id="fieldSeasonsData">{{ field_seasons_json|safe }}</script>
+    {% endif %}
     <script>
+        // Crop-season form: show which crops already occupy the selected field.
+        (function() {
+            var dataEl = document.getElementById('fieldSeasonsData');
+            var fieldSelect = document.getElementById('id_field');
+            var panel = document.getElementById('fieldCropsPanel');
+            var list = document.getElementById('fieldCropsList');
+            if (!dataEl || !fieldSelect || !panel || !list) return;
+            var data = {};
+            try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+            function render() {
+                var rows = data[fieldSelect.value] || [];
+                list.innerHTML = '';
+                if (!fieldSelect.value) { panel.hidden = true; return; }
+                panel.hidden = false;
+                if (!rows.length) {
+                    var li = document.createElement('li');
+                    li.className = 'fcp-empty';
+                    li.textContent = 'No crops planted on this field yet.';
+                    list.appendChild(li);
+                    return;
+                }
+                rows.forEach(function(r) {
+                    var li = document.createElement('li');
+                    var main = document.createElement('span');
+                    main.textContent = r.crop + ' (' + r.season + ')';
+                    var status = document.createElement('span');
+                    status.className = 'fcp-status';
+                    status.textContent = r.status;
+                    li.appendChild(main);
+                    li.appendChild(status);
+                    list.appendChild(li);
+                });
+            }
+            fieldSelect.addEventListener('change', render);
+            render();
+        })();
+
         // Sale form: keep the processing stage list in sync with the chosen harvest
         // and default to the latest stage of that harvest.
         (function() {

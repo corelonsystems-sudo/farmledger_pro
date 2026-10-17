@@ -35,12 +35,14 @@
         <h2>{{ model_name }}</h2>
         <p>{% if is_waste %}Track and manage waste sale records from processing byproducts.{% else %}Track and manage all crop sales across your farm operations.{% endif %}</p>
     </div>
+    {% if can_write %}
     <div class="page-actions">
         <button class="btn btn-primary" data-modal-url="{{ urls.create }}{% if is_waste %}?waste=1{% endif %}" data-modal-title="{{ create_label }}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             {{ create_label }}
         </button>
     </div>
+    {% endif %}
 </div>
 
 {% if stats %}
@@ -194,6 +196,13 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                                 View
                             </a>
+                            {% if can_write %}
+                            {% if not is_waste and sale.receivable %}
+                            <a class="action-btn" data-modal-url="{% url 'sale_record_payment' pk=sale.pk %}" data-modal-title="Record Payment — balance {{ sale.receivable|as_currency:currency }}" href="javascript:void(0)" style="background:#f0fdf4; color:var(--primary);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                                Pay
+                            </a>
+                            {% endif %}
                             {% if is_waste %}
                             <a class="action-btn" data-modal-url="{{ sale.waste_edit_url }}" data-modal-title="Edit Stock" href="javascript:void(0)">
                             {% else %}
@@ -206,6 +215,7 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                                 Delete
                             </a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

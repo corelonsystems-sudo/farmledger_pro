@@ -7,6 +7,14 @@ register = template.Library()
 
 
 @register.filter
+def get_item(mapping, key):
+    """Dictionary/attribute lookup for table rendering: row|get_item:col.key."""
+    if isinstance(mapping, dict):
+        return mapping.get(key)
+    return getattr(mapping, key, None)
+
+
+@register.filter
 def sub(value, arg):
     """Subtract arg from value."""
     try:

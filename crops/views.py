@@ -1,9 +1,10 @@
 from datetime import date
 from decimal import Decimal
 
+from django import forms
 from django.contrib.auth.decorators import login_required
 from django.db.models import Prefetch
-from django.http import Http404
+from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 
@@ -15,6 +16,82 @@ from .models import Crop, CropSeason, HarvestRecord, ProcessingStage, Sale
 def _sold_qty(sales, unit):
     """Sum sale quantities normalized to the given unit."""
     return sum((s.quantity_in_unit(unit) for s in sales), Decimal('0'))
+
+
+def _crop_stock_chart(rows):
+    """SVG two-line chart over generic rows {'label','sold','in_store'} —
+    cumulative quantity sold against remaining stock in store, one shared
+    quantity axis. None when rows is empty."""
+    import math
+    from farmledger.views import _nice_ceiling, _smooth_path
+    if not rows:
+        return None
+    X0, X1, Y0, Y1 = 72, 572, 36, 190
+    H = Y1 - Y0
+    count = len(rows)
+    max_v = _nice_ceiling(max(
+        max(r['sold'] for r in rows), max(r['in_store'] for r in rows)))
+
+    def ypos(value):
+        return round(Y1 - H * float(value / max_v), 1) if max_v else Y1
+
+    label_step = max(1, math.ceil(count / 12))
+    for i, r in enumerate(rows):
+        r['x'] = round(X0 + (X1 - X0) * i / (count - 1), 1) if count > 1 else (X0 + X1) / 2
+        r['sy'] = ypos(r['sold'])
+        r['iy'] = ypos(r['in_store'])
+        r['show_label'] = i % label_step == 0 or i == count - 1
+    sold_path = _smooth_path([(r['x'], r['sy']) for r in rows], Y0, Y1)
+    return {
+        'rows': rows,
+        'sold_path': sold_path,
+        'area_path': (f'{sold_path} L {rows[-1]["x"]},{Y1} L {rows[0]["x"]},{Y1} Z'
+                      if count > 1 else ''),
+        'store_path': _smooth_path([(r['x'], r['iy']) for r in rows], Y0, Y1),
+        'ticks': [{'value': max_v * Decimal(n) / 4,
+                   'y': round(Y1 - H * n / 4, 1)} for n in (4, 3, 2, 1, 0)],
+        'last': rows[-1],
+    }
+
+
+def _crop_stage_flow(harvest_rows, total_harvested, raw_sold, raw_in_store):
+    """Aggregate every harvest's processing chain by stage (sequence, name)
+    into a top-down production flow: raw harvest -> stage 1 -> stage 2 ...
+    Each row carries sold / in-store / passed-on / lost splits scaled to the
+    raw harvest total so the bars shrink as quantity is consumed."""
+    from farmledger.views import _bar_scale
+    first = {'label': 'Harvested (raw)', 'sequence': 0, 'qty': total_harvested,
+             'sold': raw_sold, 'in_store': raw_in_store, 'lost': Decimal('0'),
+             'unit': None, 'is_raw': True}
+    stages = {}
+    for r in harvest_rows:
+        if first['unit'] is None:
+            first['unit'] = r['harvest'].unit
+        for line in r['lines']:
+            if line['is_raw']:
+                continue
+            st = line['stage']
+            key = (st.sequence, st.name)
+            agg = stages.setdefault(key, {
+                'label': f'{st.sequence}. {st.name}', 'sequence': st.sequence,
+                'qty': Decimal('0'), 'sold': Decimal('0'), 'in_store': Decimal('0'),
+                'lost': Decimal('0'), 'unit': line['unit'], 'is_raw': False, 'n': 0})
+            agg['qty'] += line['available'] or Decimal('0')
+            agg['sold'] += line['sold'] or Decimal('0')
+            agg['in_store'] += line['remaining'] or Decimal('0')
+            agg['lost'] += line['depreciated'] or Decimal('0')
+            agg['n'] += 1
+    rows = [first] + [stages[k] for k in sorted(stages)]
+    for row in rows:
+        # Whatever was neither sold nor left in store moved on to the next stage.
+        row['passed_on'] = max(row['qty'] - row['sold'] - row['in_store'], Decimal('0'))
+        row['total'] = row['qty']
+    _bar_scale(rows, 'total')
+    max_v = max((r['qty'] for r in rows), default=Decimal('0'))
+    for row in rows:
+        for k in ('sold', 'in_store', 'passed_on', 'lost'):
+            row[f'{k}_pct'] = round(float(row[k] / max_v * 100), 1) if max_v else 0
+    return rows if total_harvested or len(rows) > 1 else []
 
 
 @login_required
@@ -218,17 +295,84 @@ def crop_detail_view(request, pk):
     # and therefore already counted in total_expenses - do not subtract twice.
     net_profit = total_revenue - total_expenses
 
-    chart_data = {
-        'labels': [row['harvest'].harvest_date.strftime('%Y-%m-%d') if row['harvest'].harvest_date else f"HVT-{row['harvest'].pk}" for row in harvest_rows],
-        'costs': [row['processing_cost'] for row in harvest_rows],
-        'revenues': [row['total_revenue'] for row in harvest_rows],
-        'depreciated': [row['total_depreciated'] for row in harvest_rows],
-    }
+    # ---- Chart filters (GET): season, year, processing stage, harvest ------
+    season_id = request.GET.get('season') or ''
+    year = request.GET.get('year') or ''
+    stage_name = request.GET.get('stage') or ''
+    harvest_id = request.GET.get('harvest') or ''
 
+    def stage_date(st):
+        return st.end_date or st.start_date or st.harvest.harvest_date
+
+    years = sorted({d.year for d in
+                    [s.sale_date for s in sales if s.sale_date]
+                    + [stage_date(st) for st in processing_stages if stage_date(st)]
+                    + [h.harvest_date for h in harvests if h.harvest_date]}, reverse=True)
+    stage_names = sorted({st.name for st in processing_stages})
+    chart_seasons = [s for s in seasons if str(s.pk) == season_id] if season_id else seasons
+    chart_harvests = [h for h in harvests
+                      if (not harvest_id or str(h.pk) == harvest_id)
+                      and h.crop_season in chart_seasons]
+    chart_stages = [st for st in processing_stages
+                    if st.harvest in chart_harvests
+                    and (not stage_name or st.name == stage_name)]
+    chart_sales = [s for s in sales
+                   if s.harvest in chart_harvests
+                   and (not stage_name or (s.processing_stage and s.processing_stage.name == stage_name))]
+
+    # The active year must have activity within the filtered selection.
+    f_years = {d.year for d in
+               [s.sale_date for s in chart_sales if s.sale_date]
+               + [stage_date(st) for st in chart_stages if stage_date(st)]}
+    active_year = year if year in {str(y) for y in f_years} else (str(max(f_years)) if f_years else '')
+    stock_chart = None
+    if active_year:
+        import calendar
+        y = int(active_year)
+        unit = crop.default_unit or 'kg'
+        sold_m = {m: Decimal('0') for m in range(1, 13)}
+        dep_m = {m: Decimal('0') for m in range(1, 13)}
+        for s in chart_sales:
+            if s.sale_date and s.sale_date.year == y:
+                sold_m[s.sale_date.month] += s.quantity_in_unit(unit)
+        for st in chart_stages:
+            d = stage_date(st)
+            if d and d.year == y:
+                dep_m[d.month] += (st.input_quantity or Decimal('0')) - (st.output_quantity or Decimal('0'))
+        harvested_total = sum((h.quantity or Decimal('0') for h in chart_harvests), Decimal('0'))
+        month_rows, cum_sold, cum_dep = [], Decimal('0'), Decimal('0')
+        for m in range(1, 13):
+            cum_sold += sold_m[m]
+            cum_dep += dep_m[m]
+            month_rows.append({'label': calendar.month_abbr[m], 'sold': cum_sold,
+                               'in_store': harvested_total - cum_sold - cum_dep})
+        stock_chart = _crop_stock_chart(month_rows)
+        scope_sold = cum_sold
+        scope_store = harvested_total - cum_sold - cum_dep
+    else:
+        scope_sold = scope_store = Decimal('0')
+
+    # Stages-of-production flow follows the season/harvest scope.
+    flow_rows = [r for r in harvest_rows if r['harvest'] in chart_harvests]
+    flow_harvested = sum((r['harvest'].quantity for r in flow_rows), Decimal('0'))
+    flow_raw_sold = sum((r['raw_sold'] for r in flow_rows), Decimal('0'))
+    flow_raw_store = sum((r['raw_remaining'] for r in flow_rows), Decimal('0'))
+    stage_flow = _crop_stage_flow(flow_rows, flow_harvested, flow_raw_sold, flow_raw_store)
+
+    chart_filters = {
+        'season': season_id, 'year': active_year, 'stage': stage_name,
+        'harvest': harvest_id, 'years': years, 'stage_names': stage_names,
+    }
     pie_data = {
         'labels': ['Raw in Store', 'Processed in Store', 'Raw Sold', 'Processed Sold', 'Depreciated'],
         'values': [total_raw_in_store, total_processed_in_store, total_raw_sold, total_processed_sold, total_depreciated],
     }
+    from farmledger.views import _donut_segments
+    qty_segments = _donut_segments(sorted(
+        [{'label': l, 'total': v} for l, v in zip(pie_data['labels'], pie_data['values']) if v and v > 0],
+        key=lambda r: r['total'], reverse=True))
+    qty_total = sum((s['total'] for s in qty_segments), Decimal('0'))
+    qty_center = f'{qty_total.normalize():f} {crop.default_unit or ""}'.strip()
 
     # Build a chronological stock-flow ledger from harvests, processing, and sales.
     stock_flow = []
@@ -300,12 +444,20 @@ def crop_detail_view(request, pk):
         'total_processing_cost': total_processing_cost,
         'total_depreciated': total_depreciated,
         'net_profit': net_profit,
-        'chart_data': chart_data,
-        'pie_data': pie_data,
+        'line_chart': stock_chart,
+        'stock_scope_sold': scope_sold,
+        'stock_scope_store': scope_store,
+        'qty_segments': qty_segments,
+        'qty_total': qty_total,
+        'qty_center': qty_center,
+        'stage_flow': stage_flow,
+        'chart_filters': chart_filters,
         'stock_flow': stock_flow,
         'stock_flow_seasons': stock_flow_seasons,
         'stock_flow_types': stock_flow_types,
         'stock_flow_harvests': stock_flow_harvests,
+        'can_write': request.user.is_superuser or accessible_farms(
+            request.user, write_model='crops.cropseason').exists(),
     }
     return render(request, 'crops/crop_detail.html', context)
 
@@ -447,6 +599,8 @@ def harvest_detail_view(request, pk):
         'processed_in_store': processed_in_store,
         'chart_data': chart_data,
         'pie_data': pie_data,
+        'can_write': request.user.is_superuser or accessible_farms(
+            request.user, write_model='crops.harvestrecord').exists(),
     }
     return render(request, 'crops/harvest_detail.html', context)
 
@@ -638,6 +792,8 @@ def crop_season_detail_view(request, pk):
         'yield_unit': primary_unit,
         'chart_data': chart_data,
         'pie_data': pie_data,
+        'can_write': request.user.is_superuser or accessible_farms(
+            request.user, write_model='crops.cropseason').exists(),
     }
     return render(request, 'crops/crop_season_detail.html', context)
 
@@ -660,6 +816,8 @@ def customer_detail_view(request, pk):
         'total_spend': total_spend,
         'outstanding': outstanding,
         'last_sale': last_sale,
+        'can_write': request.user.is_superuser or accessible_farms(
+            request.user, write_model='crops.customer').exists(),
     })
 
 
@@ -681,6 +839,51 @@ def sale_detail_view(request, pk):
         else:
             waste_name = 'Unnamed Waste'
     return render(request, 'crops/sale_detail.html', {'sale': sale, 'waste_name': waste_name})
+
+
+class SalePaymentForm(forms.Form):
+    amount = forms.DecimalField(
+        min_value=Decimal('0.01'), max_digits=14, decimal_places=2,
+        help_text='Amount collected from the buyer now.')
+
+    def __init__(self, *args, balance=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.balance = balance if balance is not None else Decimal('0')
+
+    def clean_amount(self):
+        amount = self.cleaned_data['amount']
+        if amount > self.balance:
+            raise forms.ValidationError(
+                f'Amount exceeds the outstanding balance ({self.balance}).')
+        return amount
+
+
+@login_required
+def sale_record_payment_view(request, pk):
+    """Record a payment against a sale's outstanding receivable."""
+    sale = get_object_or_404(scoped_queryset(Sale, request.user, write=True), pk=pk)
+    balance = sale.receivable
+    if request.method == 'POST':
+        form = SalePaymentForm(request.POST, balance=balance)
+        if form.is_valid():
+            received = (sale.amount_received or Decimal('0')) + form.cleaned_data['amount']
+            if received >= sale.total_amount:
+                sale.payment_status = Sale.PaymentStatus.PAID
+                sale.amount_received = sale.total_amount
+            else:
+                sale.payment_status = Sale.PaymentStatus.PARTIAL
+                sale.amount_received = received
+            sale.save()
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'ok': True, 'redirect': reverse(
+                    'model_list', args=['crops', 'sale'])})
+            return HttpResponseRedirect(reverse('model_list', args=['crops', 'sale']))
+    else:
+        form = SalePaymentForm(balance=balance, initial={'amount': balance})
+    return render(request, 'dashboard/form.html', {
+        'app': 'crops', 'model': 'sale', 'model_name': 'Payment',
+        'form': form, 'action': 'Record',
+    })
 
 
 @login_required
@@ -789,5 +992,7 @@ def waste_detail_view(request, pk):
         'edit_source_url': edit_source_url,
         'chart_data': chart_data,
         'pie_data': pie_data,
+        'can_write': request.user.is_superuser or accessible_farms(
+            request.user, write_model='crops.sale').exists(),
     }
     return render(request, 'crops/waste_detail.html', context)

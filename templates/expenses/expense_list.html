@@ -15,12 +15,14 @@
         <h2>Expenses</h2>
         <p>Every expense is linked to a budget item — track spending, vendors, and reconciliation.</p>
     </div>
+    {% if can_write %}
     <div class="page-actions">
         <button class="btn btn-primary" data-modal-url="{{ urls.create }}" data-modal-title="New Expense">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             New Expense
         </button>
     </div>
+    {% endif %}
 </div>
 
 {% if stats %}
@@ -178,8 +180,10 @@
                     <td>{% if expense.reconciliation_status == 'FLAGGED' %}<span class="cell-red">{{ expense.get_reconciliation_status_display }}</span>{% else %}{{ expense.get_reconciliation_status_display }}{% endif %}</td>
                     <td>
                         <div class="row-actions">
+                            {% if can_write %}
                             <a class="link" data-modal-url="{% url 'model_update' app=app model=model pk=expense.pk %}" data-modal-title="Edit Expense" href="javascript:void(0)">Edit</a>
                             <a class="link cell-red" data-modal-url="{% url 'model_delete' app=app model=model pk=expense.pk %}" data-modal-title="Delete Expense" href="javascript:void(0)">Delete</a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

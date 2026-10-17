@@ -818,7 +818,7 @@ class BankTransactionForm(forms.ModelForm):
     class Meta:
         model = BankTransaction
         fields = ['bank_account', 'date', 'description', 'amount', 'transaction_id',
-                  'matched_expense', 'is_reconciled', 'is_flagged']
+                  'matched_expense', 'matched_income', 'is_reconciled', 'is_flagged']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.TextInput(attrs={'placeholder': 'Transaction description'}),

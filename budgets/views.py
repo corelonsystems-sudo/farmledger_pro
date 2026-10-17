@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
@@ -46,6 +48,14 @@ def budget_code_detail_view(request, pk):
     total_planned = sum(i.planned_amount for i in items)
     total_spent = sum(i.spent_amount for i in items)
 
+    from farmledger.views import _donut_segments
+    by_budget = {}
+    for item in items:
+        by_budget[item.budget] = by_budget.get(item.budget, Decimal('0')) + (item.planned_amount or Decimal('0'))
+    budget_segments = _donut_segments(sorted(
+        [{'label': b.name or f'Budget {b.pk}', 'total': v} for b, v in by_budget.items() if v > 0],
+        key=lambda r: r['total'], reverse=True))
+
     header_farms = list(accessible_farms(request.user).order_by('pk')[:2])
     context = {
         'code': code,
@@ -57,6 +67,7 @@ def budget_code_detail_view(request, pk):
         'total_planned': total_planned,
         'total_spent': total_spent,
         'total_remaining': total_fund - total_spent,
+        'budget_segments': budget_segments,
     }
     return render(request, 'budgets/budget_code_detail.html', context)
 
@@ -165,13 +176,132 @@ def budget_plan_edit_view(request, pk=None):
     })
 
 
+def _budget_burn_chart(budget, expenses, total_planned):
+    """Cumulative actual spend vs straight-line planned pace, per month.
+
+    Returns {'rows', 'actual_points', 'plan_points', 'max'} or None when no
+    date range can be determined."""
+    import math
+    from datetime import date, timedelta
+    from decimal import Decimal
+
+    months = []
+    if budget.start_date and budget.end_date and budget.start_date <= budget.end_date:
+        cur = budget.start_date.replace(day=1)
+        while cur <= budget.end_date:
+            months.append(cur)
+            cur = (cur.replace(day=28) + timedelta(days=7)).replace(day=1)
+    if not months:
+        dates = [e.date for e in expenses if e.date]
+        if not dates:
+            return None
+        cur = min(dates).replace(day=1)
+        end = max(dates)
+        while cur <= end:
+            months.append(cur)
+            cur = (cur.replace(day=28) + timedelta(days=7)).replace(day=1)
+    # Cumulative actual spend per month
+    monthly = {}
+    for e in expenses:
+        if e.date:
+            key = e.date.strftime('%Y-%m')
+            monthly[key] = monthly.get(key, Decimal('0')) + (e.amount or Decimal('0'))
+    today = date.today()
+    this_month = today.replace(day=1)
+    rows, cumulative = [], Decimal('0')
+    count = len(months)
+    for i, m in enumerate(months):
+        spend = monthly.get(m.strftime('%Y-%m'), Decimal('0'))
+        cumulative += spend
+        pace = total_planned * Decimal(i + 1) / count if count else Decimal('0')
+        rows.append({'label': m.strftime('%b %Y'), 'month': m, 'spend': spend,
+                     'actual': cumulative, 'plan': pace})
+    # Only months that have elapsed (or carry spend) are plotted on the actual
+    # line; future months are left blank instead of drawing a flat tail.
+    last_spend_idx = max((i for i, r in enumerate(rows) if r['spend']), default=-1)
+    plotted = [i for i, r in enumerate(rows) if r['month'] <= this_month or i <= last_spend_idx]
+    plot_until = max(plotted) if plotted else -1
+
+    # The bold series is spend *per month* (so the line rises and falls with
+    # each month's expenses); cumulative spend and the plan diagonal share the axis.
+    from farmledger.views import _nice_ceiling, _smooth_path
+    monthly_pace = total_planned / count if count else Decimal('0')
+    raw_max = max(max((r['actual'] for r in rows), default=Decimal('0')), total_planned)
+    max_v = _nice_ceiling(raw_max)
+
+    X0, X1, Y0, Y1 = 72, 608, 36, 190  # plot box
+    H = Y1 - Y0
+
+    def ypos(value):
+        return round(Y1 - H * float(value / max_v), 1) if max_v else Y1
+
+    label_step = max(1, math.ceil(count / 12))
+    for i, row in enumerate(rows):
+        row['x'] = round(X0 + (X1 - X0) * i / (count - 1), 1) if count > 1 else (X0 + X1) / 2
+        row['ay'] = ypos(row['spend'])
+        row['cy'] = ypos(row['actual'])
+        row['py'] = ypos(row['plan'])
+        row['plot'] = i <= plot_until
+        row['show_label'] = i % label_step == 0 or i == count - 1
+
+    def smooth_path(points):
+        return _smooth_path(points, Y0, Y1)
+
+    plotted_rows = [r for r in rows if r['plot']]
+    actual_path = smooth_path([(r['x'], r['ay']) for r in plotted_rows])
+    area_path = (f'{actual_path} L {plotted_rows[-1]["x"]},{Y1} L {plotted_rows[0]["x"]},{Y1} Z'
+                 if len(plotted_rows) > 1 else '')
+    cumulative_path = smooth_path([(r['x'], r['cy']) for r in plotted_rows])
+    # Plan pace is the straight diagonal from zero at the start to the full plan at the end.
+    plan_path = f'M {rows[0]["x"]},{Y1} L {rows[-1]["x"]},{ypos(total_planned)}'
+
+    today_x = expected_today = None
+    if (budget.start_date and budget.end_date and budget.start_date < budget.end_date
+            and budget.start_date <= today <= budget.end_date):
+        frac = (today - budget.start_date).days / (budget.end_date - budget.start_date).days
+        today_x = round(X0 + (X1 - X0) * frac, 1)
+        expected_today = (total_planned * Decimal(str(frac))).quantize(Decimal('1'))
+    spent = plotted_rows[-1]['actual'] if plotted_rows else Decimal('0')
+    status = None
+    if expected_today is not None:
+        diff = spent - expected_today
+        status = {'expected': expected_today, 'diff': abs(diff),
+                  'tone': 'over' if diff > 0 else 'under',
+                  'label': 'ahead of pace' if diff > 0 else 'under pace'}
+    last = plotted_rows[-1] if plotted_rows else None
+    ticks = [{'value': max_v * Decimal(n) / 4, 'y': round(Y1 - H * n / 4, 1)} for n in (4, 3, 2, 1, 0)]
+    return {
+        'rows': rows,
+        'max': max_v,
+        'ticks': ticks,
+        'actual_path': actual_path,
+        'cumulative_path': cumulative_path,
+        'plan_path': plan_path,
+        'plan_top_y': ypos(total_planned),
+        'area_path': area_path,
+        'today_x': today_x,
+        'today_anchor': 'start' if today_x is not None and today_x < (X0 + X1) / 2 else 'end',
+        'status': status,
+        'spent': spent,
+        'monthly_pace': monthly_pace,
+        'pace_y': ypos(monthly_pace),
+        'plan_pct': round(float(spent / total_planned * 100), 1) if total_planned else 0,
+        'last': last,
+        'end_label': ({'x': last['x'] - 8 if last['x'] > (X0 + X1) / 2 else last['x'] + 8,
+                       'y': max(last['ay'] - 10, Y0 + 10),
+                       'anchor': 'end' if last['x'] > (X0 + X1) / 2 else 'start'}
+                      if last else None),
+        'has_actual': any(r['actual'] for r in rows),
+    }
+
+
 @login_required
 def budget_detail_view(request, pk):
     budget = get_object_or_404(
         scoped_queryset(Budget, request.user, Budget.objects.select_related('farm_profile')),
         pk=pk)
     plan = budget_plan_data(budget)
-    expenses = Expense.objects.filter(budget_item__budget=budget).select_related('category', 'budget_item').order_by('-date')
+    expenses = list(Expense.objects.filter(budget_item__budget=budget).select_related('category', 'budget_item').order_by('-date'))
     if request.GET.get('export'):
         from farmledger.views import _M, _export_report
         sections = budget_export_sections(budget, plan)
@@ -183,8 +313,18 @@ def budget_detail_view(request, pk):
             request, request.GET['export'], f'Annual Operating Budget - {budget.name}',
             f'budget_{budget.pk}', sections, str(budget.start_date or ''),
             str(budget.end_date or ''), farm=budget.farm_profile)
+    from farmledger.views import _donut_segments
+    sub_totals = {}
+    for item in budget.items.select_related('subcode', 'category'):
+        name = item.subcode.name if item.subcode_id else (item.head or item.category.name)
+        sub_totals[name] = sub_totals.get(name, Decimal('0')) + item.planned_amount
+    alloc_segments = _donut_segments(sorted(
+        ({'label': k, 'total': v} for k, v in sub_totals.items()),
+        key=lambda r: r['total'], reverse=True))
     return render(request, 'budgets/budget_detail.html', {
         'budget': budget, 'expenses': expenses, **plan,
+        'burn_chart': _budget_burn_chart(budget, expenses, plan['total_planned']),
+        'alloc_segments': alloc_segments,
         'can_edit': scoped_queryset(Budget, request.user, write=True).filter(pk=budget.pk).exists(),
     })
 

@@ -1,0 +1,137 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ title }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">{{ list_label|default:title }}</a> &rsaquo; {{ title }}{% endblock %}
+{% block nav_fields %}{% if nav == 'field' %}active{% endif %}{% endblock %}
+{% block nav_parcels %}{% if nav == 'landparcel' %}active{% endif %}{% endblock %}
+{% block nav_equipment %}{% if nav == 'equipment' %}active{% endif %}{% endblock %}
+{% block nav_maintenance %}{% if nav == 'maintenancelog' %}active{% endif %}{% endblock %}
+{% block nav_equipment_usage %}{% if nav == 'equipmentusage' %}active{% endif %}{% endblock %}
+{% block nav_inventory %}{% if nav == 'inventoryitem' %}active{% endif %}{% endblock %}
+{% block nav_stock_txns %}{% if nav == 'inventorytransaction' %}active{% endif %}{% endblock %}
+{% block nav_alerts %}{% if nav == 'inventoryalert' %}active{% endif %}{% endblock %}
+{% block nav_workers %}{% if nav == 'worker' %}active{% endif %}{% endblock %}
+{% block nav_tasks %}{% if nav == 'task' %}active{% endif %}{% endblock %}
+{% block nav_attendance %}{% if nav == 'attendancerecord' %}active{% endif %}{% endblock %}
+{% block nav_payroll %}{% if nav == 'payrollrun' %}active{% endif %}{% endblock %}
+{% block nav_animal_records %}{% if nav == 'animalrecord' %}active{% endif %}{% endblock %}
+{% block extra_head %}
+{% include "dashboard/detail_page_styles.html" %}
+{% include "dashboard/list_page_styles.html" %}
+{% endblock %}
+{% block content %}
+<div class="profile-header">
+    <div class="profile-identity">
+        <div class="avatar">{% if title %}{{ title|first|upper }}{% endif %}</div>
+        <div class="profile-name">
+            <h1>{{ title }}</h1>
+            <div class="profile-meta">
+                {{ subtitle }}
+                {% if status_pill %} <span class="pill-badge pill-{{ status_pill.color }}">{{ status_pill.text }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="profile-actions">
+        {% for action in actions %}
+            {% if action.method == 'post' %}
+            <form method="post" action="{{ action.url }}" style="display:inline;" {% if action.confirm %}onsubmit="return confirm('{{ action.confirm }}');"{% endif %}>
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary">{{ action.label }}</button>
+            </form>
+            {% else %}
+            <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ action.url }}" data-modal-title="{{ action.label }}">{{ action.label }}</a>
+            {% endif %}
+        {% endfor %}
+        {% if can_write %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete">Delete</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    {% for stat in stats %}
+    <div class="kpi-card">
+        <div class="kpi-icon {{ stat.color|default:'green' }}">
+            {% if stat.icon == 'money' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            {% elif stat.icon == 'clock' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {% elif stat.icon == 'alert' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {% elif stat.icon == 'layers' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            {% elif stat.icon == 'check' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>{% endif %}
+        </div>
+        <div>
+            <div class="kpi-value">{{ stat.value }}</div>
+            <div class="kpi-label">{{ stat.label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if info_groups %}
+<div class="budget-header">
+    {% for group in info_groups %}
+    <div class="summary-card">
+        <h3>{{ group.title }}</h3>
+        {% for row in group.rows %}
+        <div class="summary-row">
+            <span class="label">{{ row.label }}</span>
+            <span class="value{% if row.class %} {{ row.class }}{% endif %}">
+                {% if row.kind == 'money' %}{{ row.value|as_currency:currency }}
+                {% elif row.kind == 'pill' %}<span class="pill-badge pill-{{ row.pill }}">{{ row.value }}</span>
+                {% else %}{{ row.value|default:'-' }}{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% for table in tables %}
+<div class="panel profile-card">
+    <div class="panel-head">
+        <h3>{{ table.title }}</h3>
+        {% if table.list_url %}<a class="action-btn" href="{{ table.list_url }}">View all</a>{% endif %}
+    </div>
+    {% if table.rows %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    {% for col in table.columns %}<th{% if col.class == 'num' %} class="num"{% endif %}>{{ col.label }}</th>{% endfor %}
+                    {% if table.has_actions %}<th style="text-align:right;">Actions</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table.rows %}
+                <tr>
+                    {% for col in table.columns %}
+                    {% with cell=row|get_item:col.key %}
+                    <td{% if col.class %} class="{{ col.class }}"{% endif %}>
+                        {% if cell.kind == 'pill' %}<span class="pill-badge pill-{{ cell.pill }}">{{ cell.text }}</span>
+                        {% elif cell.kind == 'money' %}<span{% if col.class == 'num' %} class="amount"{% endif %}>{{ cell.value|as_currency:currency }}</span>
+                        {% elif cell.kind == 'main' %}<strong>{{ cell.text }}</strong>{% if cell.sub %}<div class="sub-text">{{ cell.sub }}</div>{% endif %}
+                        {% else %}{{ cell }}{% endif %}
+                    </td>
+                    {% endwith %}
+                    {% endfor %}
+                    {% if table.has_actions %}
+                    <td style="text-align:right; white-space:nowrap;">
+                        {% if row.edit_url %}<a class="action-btn" href="javascript:void(0)" data-modal-url="{{ row.edit_url }}" data-modal-title="Edit">Edit</a>{% endif %}
+                        {% if row.view_url %}<a class="action-btn" href="{{ row.view_url }}">View</a>{% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>{{ table.empty|default:'Nothing here yet' }}</p></div>
+    {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

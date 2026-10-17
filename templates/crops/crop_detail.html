@@ -5,6 +5,7 @@
 {% block extra_head %}
 {% include "dashboard/list_page_styles.html" %}
 {% include "dashboard/detail_page_styles.html" %}
+{% include "dashboard/svg_chart_styles.html" %}
 <style>
     .item-name { font-weight: 600; }
     .stock-flow-filters {
@@ -30,41 +31,6 @@
         outline: none;
         border-color: var(--primary);
         box-shadow: 0 0 0 3px rgba(45,106,79,0.08);
-    }
-    .charts-grid {
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        gap: 20px;
-        align-items: start;
-    }
-    @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
-    .chart-box h3 {
-        border-bottom: 1px solid var(--border);
-        padding-bottom: 10px;
-        margin: 0 0 14px;
-        color: var(--primary-dark);
-        font-weight: 700;
-        font-size: 0.95rem;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .chart-box h3 a {
-        font-size: 0.72rem;
-        font-weight: 500;
-        color: var(--primary);
-        text-decoration: underline;
-        cursor: pointer;
-    }
-    .chart-summary {
-        display: none;
-        background: #f6f7f5;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 10px 12px;
-        margin-bottom: 10px;
-        font-size: 0.78rem;
-        line-height: 1.5;
     }
     .meta-pill {
         display: inline-block;
@@ -93,7 +59,11 @@
         font-weight: 600;
     }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% if not can_write %}
+<style>
+    [data-modal-url] { display: none !important; }
+</style>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -194,26 +164,126 @@
     </div>
 </div>
 
-<div class="panel profile-card">
-    <div class="charts-grid">
-        <div class="chart-box">
-            <h3>Revenue, Cost &amp; Depreciation by Harvest
-                <a href="javascript:void(0)" onclick="toggleChartSummary()">What's in these graphs?</a>
-            </h3>
-            <div id="chartSummary" class="chart-summary"></div>
-            <div style="height:240px;">
-                <canvas id="cropLineChart"></canvas>
+<div class="chart-duo">
+    <article class="burn-chart">
+        <div class="burn-head">
+            <div>
+                <h3>Stock in Store vs Stock Sold{% if chart_filters.year %} &middot; {{ chart_filters.year }}{% endif %}</h3>
+                <p class="burn-sub">Cumulative quantity sold against the stock still remaining in store, month by month.</p>
             </div>
-            {{ chart_data|json_script:"crop-chart-data" }}
-        </div>
-        <div class="chart-box">
-            <h3>Quantity Distribution</h3>
-            <div style="height:240px;">
-                <canvas id="cropPieChart"></canvas>
+            <div class="burn-stat">
+                <strong>{{ stock_scope_store|floatformat:"-2" }} {{ crop.default_unit }}</strong>
+                <span>in store now</span>
+                <em class="pace under">{{ stock_scope_sold|floatformat:"-2" }} {{ crop.default_unit }} sold</em>
             </div>
-            {{ pie_data|json_script:"crop-pie-data" }}
         </div>
-    </div>
+        <form class="chart-filters" method="get" action="">
+            <label>Season
+                <select name="season" onchange="this.form.submit()">
+                    <option value="">All seasons</option>
+                    {% for s in seasons %}
+                    <option value="{{ s.pk }}" {% if chart_filters.season == s.pk|stringformat:"s" %}selected{% endif %}>{{ s.field|default:"Season" }}{% if s.planting_date %} {{ s.planting_date|date:"Y" }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Year
+                <select name="year" onchange="this.form.submit()">
+                    {% for y in chart_filters.years %}
+                    <option value="{{ y }}" {% if chart_filters.year == y|stringformat:"s" %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Stage
+                <select name="stage" onchange="this.form.submit()">
+                    <option value="">All stages</option>
+                    {% for n in chart_filters.stage_names %}
+                    <option value="{{ n }}" {% if chart_filters.stage == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Harvest
+                <select name="harvest" onchange="this.form.submit()">
+                    <option value="">All harvests</option>
+                    {% for h in harvests %}
+                    <option value="{{ h.pk }}" {% if chart_filters.harvest == h.pk|stringformat:"s" %}selected{% endif %}>{% if h.harvest_date %}{{ h.harvest_date|date:"d M Y" }}{% else %}HVT-{{ h.pk }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% if chart_filters.season or chart_filters.stage or chart_filters.harvest %}
+            <a class="filter-reset" href="">Reset</a>
+            {% endif %}
+        </form>
+        {% if line_chart %}
+        <div class="burn-frame">
+            <svg class="burn-line" viewBox="0 0 640 236" role="img" aria-label="Monthly stock in store versus stock sold">
+                <defs>
+                    <linearGradient id="cropAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#1b4332" stop-opacity=".2"/>
+                        <stop offset="100%" stop-color="#1b4332" stop-opacity=".02"/>
+                    </linearGradient>
+                </defs>
+                {% for t in line_chart.ticks %}
+                <line class="line-grid{% if forloop.last %} base{% endif %}" x1="72" y1="{{ t.y }}" x2="572" y2="{{ t.y }}"/>
+                <text class="axis-val" x="62" y="{{ t.y|add:'3' }}" text-anchor="end">{% if forloop.last %}0{% else %}{{ t.value|floatformat:"-1" }}{% endif %}</text>
+                {% endfor %}
+                <path class="line-area crop-area" d="{{ line_chart.area_path }}"/>
+                <path class="line-path plan" d="{{ line_chart.store_path }}"/>
+                <path class="line-path actual" d="{{ line_chart.sold_path }}"/>
+                {% for m in line_chart.rows %}
+                <circle class="line-point cost" cx="{{ m.x }}" cy="{{ m.iy }}" r="3"><title>{{ m.label }} — in store: {{ m.in_store|floatformat:"-2" }} {{ crop.default_unit }}</title></circle>
+                <circle class="line-point spent" cx="{{ m.x }}" cy="{{ m.sy }}" r="3.8"><title>{{ m.label }} — sold to date: {{ m.sold|floatformat:"-2" }} {{ crop.default_unit }} · in store: {{ m.in_store|floatformat:"-2" }} {{ crop.default_unit }}</title></circle>
+                {% if m.show_label %}<text class="axis-x" x="{{ m.x }}" y="212" text-anchor="middle">{{ m.label }}</text>{% endif %}
+                {% endfor %}
+                {% if line_chart.last %}
+                <circle class="end-dot" cx="{{ line_chart.last.x }}" cy="{{ line_chart.last.iy }}" r="5"/>
+                <text class="end-label" x="{{ line_chart.last.x|add:'-8' }}" y="{{ line_chart.last.iy|add:'-10' }}" text-anchor="end">{{ line_chart.last.in_store|floatformat:"-2" }} {{ crop.default_unit }} in store</text>
+                {% endif %}
+            </svg>
+        </div>
+        <div class="burn-key">
+            <span><i class="lg-dot" style="background:#1b4332"></i>Stock sold (cumulative)</span>
+            <span><i class="lg-dash"></i>Stock in store (remaining)</span>
+        </div>
+        {% else %}
+        <p class="chart-empty">No dated activity for this selection &mdash; pick another year, season, stage or harvest.</p>
+        {% endif %}
+    </article>
+    <article class="alloc-chart">
+        <div class="burn-head">
+            <div>
+                <h3>Quantity Distribution</h3>
+                <p class="burn-sub">Where the harvested quantity sits today, and how it moved through each production stage.</p>
+            </div>
+        </div>
+        {% if qty_segments %}
+        {% include "reports/donut.html" with segments=qty_segments center_num=qty_center center_lbl="Total quantity" %}
+        {% else %}
+        <p class="chart-empty">Nothing harvested yet.</p>
+        {% endif %}
+        {% if stage_flow %}
+        <div class="stage-flow">
+            <h4>Stages of Production</h4>
+            {% for s in stage_flow %}
+            <div class="stage-row">
+                <div class="stage-meta"><span class="stage-name">{{ s.label }}</span><span class="stage-qty">{{ s.qty|floatformat:"-2" }} {{ s.unit|default:crop.default_unit }}</span></div>
+                <div class="stage-bar">
+                    {% if s.sold %}<i class="seg sold" data-width="{{ s.sold_pct }}"></i>{% endif %}
+                    {% if s.in_store %}<i class="seg store" data-width="{{ s.in_store_pct }}"></i>{% endif %}
+                    {% if s.passed_on %}<i class="seg passed" data-width="{{ s.passed_on_pct }}"></i>{% endif %}
+                    {% if s.lost %}<i class="seg lost" data-width="{{ s.lost_pct }}"></i>{% endif %}
+                </div>
+                <div class="stage-split">
+                    {% if s.sold %}<span><b class="sold"></b>Sold {{ s.sold|floatformat:"-2" }}</span>{% endif %}
+                    {% if s.in_store %}<span><b class="store"></b>In store {{ s.in_store|floatformat:"-2" }}</span>{% endif %}
+                    {% if s.passed_on %}<span><b class="passed"></b>To next stage {{ s.passed_on|floatformat:"-2" }}</span>{% endif %}
+                    {% if s.lost %}<span><b class="lost"></b>Lost in processing {{ s.lost|floatformat:"-2" }}</span>{% endif %}
+                </div>
+            </div>
+            {% if not forloop.last %}<div class="stage-arrow" aria-hidden="true">&darr;</div>{% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </article>
 </div>
 </div>
 
@@ -601,164 +671,5 @@ function filterStockFlow() {
     });
 }
 
-var currencyRate = Number('{{ currency.rate }}');
-var currencySymbol = '{{ currency.symbol|escapejs }}';
-var cropChartData = JSON.parse(document.getElementById('crop-chart-data').textContent);
-var cropCosts = cropChartData.costs.map(function(v) { return Number(v) * currencyRate; });
-var cropRevenues = cropChartData.revenues.map(function(v) { return Number(v) * currencyRate; });
-var cropDepreciated = cropChartData.depreciated.map(function(v) { return Number(v); });
-new Chart(document.getElementById('cropLineChart').getContext('2d'), {
-    type: 'bar',
-    data: {
-        labels: cropChartData.labels,
-        datasets: [
-            {
-                label: 'Sales Revenue',
-                data: cropRevenues,
-                backgroundColor: 'rgba(34, 197, 94, 0.85)',
-                hoverBackgroundColor: '#16a34a',
-                borderRadius: 5,
-                borderSkipped: false,
-                maxBarThickness: 34,
-                yAxisID: 'y',
-                order: 2
-            },
-            {
-                label: 'Processing Cost',
-                data: cropCosts,
-                backgroundColor: 'rgba(239, 68, 68, 0.75)',
-                hoverBackgroundColor: '#dc2626',
-                borderRadius: 5,
-                borderSkipped: false,
-                maxBarThickness: 34,
-                yAxisID: 'y',
-                order: 3
-            },
-            {
-                type: 'line',
-                label: 'Depreciated (' + '{{ crop.default_unit|escapejs }}' + ')',
-                data: cropDepreciated,
-                borderColor: '#f59e0b',
-                backgroundColor: '#f59e0b',
-                borderWidth: 2,
-                borderDash: [5, 4],
-                pointRadius: 4,
-                pointStyle: 'rectRot',
-                pointHoverRadius: 6,
-                tension: 0.35,
-                spanGaps: true,
-                fill: false,
-                yAxisID: 'y1',
-                order: 1
-            }
-        ]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-            legend: {
-                position: 'top',
-                align: 'start',
-                labels: { usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 9, boxHeight: 9, padding: 14, font: { size: 11 } }
-            },
-            tooltip: {
-                backgroundColor: 'rgba(15, 23, 42, 0.92)',
-                padding: 10,
-                cornerRadius: 8,
-                titleFont: { size: 12, weight: '600' },
-                bodyFont: { size: 11 },
-                callbacks: {
-                    label: function(item) {
-                        var v = item.parsed.y;
-                        if (item.dataset.yAxisID === 'y1') {
-                            return ' ' + item.dataset.label + ': ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' {{ crop.default_unit|escapejs }}';
-                        }
-                        return ' ' + item.dataset.label + ': ' + currencySymbol + ' ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 });
-                    }
-                }
-            }
-        },
-        scales: {
-            x: {
-                grid: { display: false },
-                ticks: { font: { size: 10 }, color: '#64748b' },
-                title: { display: true, text: 'Harvest date', font: { size: 10 }, color: '#94a3b8' }
-            },
-            y: {
-                type: 'linear',
-                display: true,
-                position: 'left',
-                beginAtZero: true,
-                title: { display: true, text: currencySymbol, font: { size: 10 }, color: '#94a3b8' },
-                grid: { color: '#f1f5f9' },
-                ticks: {
-                    font: { size: 10 },
-                    color: '#64748b',
-                    callback: function(v) { return currencySymbol + ' ' + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 }); }
-                }
-            },
-            y1: {
-                type: 'linear',
-                display: true,
-                position: 'right',
-                beginAtZero: true,
-                title: { display: true, text: '{{ crop.default_unit|escapejs }}', font: { size: 10 }, color: '#94a3b8' },
-                grid: { drawOnChartArea: false },
-                ticks: { font: { size: 10 }, color: '#64748b' }
-            }
-        }
-    }
-});
-
-var cropPieData = JSON.parse(document.getElementById('crop-pie-data').textContent);
-var cropPieValues = cropPieData.values.map(function(v) { return Number(v); });
-new Chart(document.getElementById('cropPieChart').getContext('2d'), {
-    type: 'pie',
-    data: {
-        labels: cropPieData.labels,
-        datasets: [{
-            data: cropPieValues,
-            backgroundColor: ['#4a7c2e', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f97316'],
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
-        }
-    }
-});
-
-function sumArr(arr) { return arr.reduce(function(a, b) { return a + b; }, 0); }
-function fmtMoney(v) { return currencySymbol + ' ' + v.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
-function fmtQty(v) { return v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' {{ crop.default_unit|escapejs }}'; }
-
-function toggleChartSummary() {
-    var box = document.getElementById('chartSummary');
-    if (box.style.display === 'none' || !box.style.display) {
-        var pieTotal = sumArr(cropPieValues);
-        var pieLines = cropPieData.labels.map(function(label, i) {
-            var v = cropPieValues[i];
-            var pct = pieTotal ? (v / pieTotal * 100).toFixed(1) : '0.0';
-            return '<li><strong>' + label + ':</strong> ' + fmtQty(v) + ' (' + pct + '%)</li>';
-        }).join('');
-        box.innerHTML =
-            '<strong>Bar chart</strong> &mdash; one group of bars per harvest (' + cropChartData.labels.length + ' harvest(s)).' +
-            '<ul style="margin:6px 0 8px 16px;">' +
-            '<li><strong>Sales Revenue</strong> (green bars, left axis, ' + currencySymbol + '): total ' + fmtMoney(sumArr(cropRevenues)) + '</li>' +
-            '<li><strong>Processing Cost</strong> (red bars, left axis, ' + currencySymbol + '): total ' + fmtMoney(sumArr(cropCosts)) + '</li>' +
-            '<li><strong>Depreciated</strong> (amber dashed line, right axis, quantity): total ' + fmtQty(sumArr(cropDepreciated)) + '</li>' +
-            '</ul>' +
-            '<strong>Pie chart</strong> &mdash; how the total quantity of ' + fmtQty(pieTotal) + ' is distributed:' +
-            '<ul style="margin:6px 0 0 16px;">' + pieLines + '</ul>';
-        box.style.display = 'block';
-    } else {
-        box.style.display = 'none';
-    }
-}
 </script>
 {% endblock %}

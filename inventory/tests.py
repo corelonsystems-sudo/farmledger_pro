@@ -49,6 +49,37 @@ class InventoryListPageTests(TestCase):
         self.assertNotContains(response, 'Empty sacks')
 
 
+class StockFlowListPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Farm A')
+        self.item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Fertilizer', unit='kg',
+            quantity_on_hand=Decimal('10'), cost_per_unit=Decimal('3'))
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='USAGE',
+            quantity=Decimal('2'), date=date(2025, 1, 10))
+        from .models import InventoryAlert
+        InventoryAlert.objects.create(item=self.item, message='Running low')
+        self.client.force_login(self.user)
+
+    def test_transactions_page(self):
+        response = self.client.get(
+            reverse('model_list', args=['inventory', 'inventorytransaction']))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Fertilizer')
+        stats = {s['label']: s['value'] for s in response.context['stats']}
+        self.assertEqual(stats['Usage Entries'], 1)
+
+    def test_alerts_page(self):
+        response = self.client.get(
+            reverse('model_list', args=['inventory', 'inventoryalert']))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Running low')
+        stats = {s['label']: s['value'] for s in response.context['stats']}
+        self.assertEqual(stats['Open'], 1)
+
+
 class InventoryPostingTests(TestCase):
     def setUp(self):
         user = User.objects.create_user(username='keeper', password='pw')
@@ -131,3 +162,73 @@ class InventoryPostingTests(TestCase):
         # Still +5, not +10
         self.assertEqual(self.item.quantity_on_hand, Decimal('15'))
         self.assertEqual(Expense.objects.count(), 1)
+
+
+class InventoryAlertResolveTests(TestCase):
+    def setUp(self):
+        from .models import InventoryAlert
+        user = User.objects.create_user(username='keeper', password='pw')
+        self.farm = FarmProfile.objects.create(user=user, farm_name='Farm A')
+        self.item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Feed', unit='kg',
+            quantity_on_hand=Decimal('10'), reorder_threshold=Decimal('5'))
+        category = Category.objects.create(name='Feed')
+        budget = Budget.objects.create(
+            farm_profile=self.farm, name='FY26', status='ACTIVE')
+        self.budget_item = BudgetItem.objects.create(
+            budget=budget, category=category, planned_amount=Decimal('1000'))
+
+    def test_restock_resolves_open_alert(self):
+        from .models import InventoryAlert, InventoryTransaction
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='USAGE',
+            quantity=Decimal('8'), date=date(2025, 1, 10))
+        alert = InventoryAlert.objects.get(item=self.item)
+        self.assertFalse(alert.is_resolved)
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='PURCHASE',
+            quantity=Decimal('20'), unit_cost=Decimal('1'),
+            budget_item=self.budget_item, date=date(2025, 1, 11))
+        alert.refresh_from_db()
+        self.assertTrue(alert.is_resolved)
+
+    def test_still_low_stock_keeps_alert_open(self):
+        from .models import InventoryAlert, InventoryTransaction
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='USAGE',
+            quantity=Decimal('8'), date=date(2025, 1, 10))
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='PURCHASE',
+            quantity=Decimal('3'), unit_cost=Decimal('1'),
+            budget_item=self.budget_item, date=date(2025, 1, 11))
+        alert = InventoryAlert.objects.get(item=self.item)
+        self.assertFalse(alert.is_resolved)
+
+
+class InventoryItemDetailTests(TestCase):
+    def setUp(self):
+        user = User.objects.create_user(username='keeper', password='pw')
+        self.farm = FarmProfile.objects.create(user=user, farm_name='Farm A')
+        other_farm = FarmProfile.objects.create(
+            user=User.objects.create_user(username='other', password='pw'))
+        self.item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Seed', unit='kg',
+            quantity_on_hand=Decimal('50'), cost_per_unit=Decimal('2'))
+        InventoryTransaction.objects.create(
+            item=self.item, transaction_type='USAGE',
+            quantity=Decimal('5'), date=date(2025, 3, 1), notes='Planting')
+        self.other_item = InventoryItem.objects.create(
+            farm_profile=other_farm, name='Hidden')
+        self.client.force_login(user)
+
+    def test_detail_shows_transactions(self):
+        response = self.client.get(
+            reverse('inventoryitem_detail', args=[self.item.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Seed')
+        self.assertContains(response, 'Planting')
+
+    def test_detail_is_farm_scoped(self):
+        response = self.client.get(
+            reverse('inventoryitem_detail', args=[self.other_item.pk]))
+        self.assertEqual(response.status_code, 404)

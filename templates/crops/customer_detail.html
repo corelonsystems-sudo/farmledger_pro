@@ -19,9 +19,11 @@
         </div>
     </div>
     <div class='profile-actions'>
+        {% if can_write %}
         <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_update' app='crops' model='customer' pk=customer.pk %}?next={{ request.path }}" data-modal-title="Edit Customer">Edit</a>
         <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_create' app='crops' model='sale' %}?customer={{ customer.pk }}&next={{ request.path }}" data-modal-title="New Sale">New Sale</a>
         <a class='btn btn-secondary' href='javascript:void(0)' data-modal-url="{% url 'model_delete' app='crops' model='customer' pk=customer.pk %}" data-modal-title="Delete Customer">Delete</a>
+        {% endif %}
     </div>
 </div>
 

@@ -3,6 +3,7 @@
 {% block breadcrumbs %}<a href="{% url 'crop_detail' crop.pk %}">{{ crop.name }}</a> &rsaquo; {{ season }}{% endblock %}
 {% block extra_head %}
 {% include "dashboard/detail_page_styles.html" %}
+{% if not can_write %}<style>[data-modal-url] { display: none !important; }</style>{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 {% endblock %}
 {% block content %}

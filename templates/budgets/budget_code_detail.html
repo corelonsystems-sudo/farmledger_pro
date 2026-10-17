@@ -4,153 +4,116 @@
 {% block nav_codes %}active{% endblock %}
 
 {% block extra_head %}
+{% include "dashboard/svg_chart_styles.html" %}
 {% include "dashboard/list_page_styles.html" %}
-{% include "dashboard/detail_page_styles.html" %}
 <style>
-    .code-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
-    .code-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
-    .code-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; border:1px solid #d8e7dc; border-radius:14px; background:white; color:#1b4332; font-size:1.8rem; font-weight:700; }
-    .code-avatar img { width:100%; height:100%; object-fit:contain; padding:6px; border-radius:14px; }
-    .code-header-copy { min-width:0; }
-    .code-eyebrow { margin:0 0 7px; color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; }
-    .code-toolbar h1 { margin:0; color:white; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; overflow-wrap:anywhere; }
-    .code-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
-    .code-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
-    .code-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; background:rgba(255,255,255,.07); color:#eff7f1; font-size:.68rem; }
-    .code-header-shared { padding:5px 10px; border-radius:6px; background:#d5f4df; color:#14532d; font-size:.68rem; font-weight:700; }
-    .code-toolbar .actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; max-width:340px; }
-    .code-toolbar .btn-primary { border:1px solid white; background:white; color:#1b4332; }
-    .code-toolbar .btn-primary:hover { background:#e4f1e9; }
-    .code-toolbar .btn-secondary { border:1px solid rgba(255,255,255,.35); background:rgba(255,255,255,.08); color:white; }
-    .code-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
-    .code-back { width:100%; margin-bottom:2px; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; }
-    .code-back:hover { color:white; text-decoration:underline; }
-    @media(max-width:1000px) { .code-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .code-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .code-back { text-align:left; } }
-    @media(max-width:600px) { .code-toolbar { padding:18px; } .code-header-identity { gap:12px; align-items:flex-start; } .code-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
-    @media print { .sidebar,.topbar,.code-toolbar .actions { display:none!important; } .main { margin:0; padding:0; } .code-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; } .code-toolbar h1,.code-eyebrow,.code-header-subtitle,.code-header-tag { color:#1b4332; } .code-header-tag { background:white; border-color:#ccd5d0; } }
-    .budget-header { grid-template-columns: 1fr 1fr; }
-    @media (max-width: 700px) { .budget-header { grid-template-columns: 1fr; } }
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; font-size:1.8rem; font-weight:700; }
+    .budget-avatar img { width:100%; height:100%; object-fit:contain; padding:6px; border-radius:14px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; background:#d5f4df; color:#14532d; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:340px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden] { display:none!important; }
+    @media print { .budget-tabs { display:none!important; } .budget-tab-panel[hidden] { display:block!important; } }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
+    .reconciliation { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:6px; }
+    .reconciliation article { background:#f4f7f5; padding:16px; border:1px solid #d4dcd7; border-radius:8px; }
+    .reconciliation h3 { font-size:.9rem; margin:0 0 12px; }
+    .reconciliation p { display:flex; justify-content:space-between; gap:12px; font-size:.8rem; border-bottom:1px solid #d4dcd7; padding-bottom:9px; }
+    .reconciliation p:last-child { border-bottom:none; padding-bottom:0; }
+    .balance-negative { color:#b91c1c; }
     .item-name { font-weight: 600; }
+    @media(max-width:700px) { .budget-paper { padding:12px; } .reconciliation { grid-template-columns:1fr; } }
+    @media print { .sidebar,.topbar,.budget-toolbar .actions { display:none!important; } .main { margin:0; padding:0; } .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; } .budget-toolbar h1,.budget-eyebrow,.budget-header-subtitle,.budget-header-tag { color:#1b4332; } .budget-header-tag,.budget-header-status { background:white; border-color:#ccd5d0; } .budget-paper { border:0; padding:0; } }
 </style>
 {% endblock %}
 
 {% block content %}
-<header class="code-toolbar" aria-labelledby="code-page-title">
-    <div class="code-header-identity">
-        <div class="code-avatar" aria-hidden="true">{% if header_farm.logo %}<img src="{{ header_farm.logo.url }}" alt="">{% else %}{{ code.name|first|upper }}{% endif %}</div>
-        <div class="code-header-copy">
-            <p class="code-eyebrow">Budget Code</p>
+<header class="budget-toolbar" aria-labelledby="code-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true">{% if header_farm.logo %}<img src="{{ header_farm.logo.url }}" alt="">{% else %}{{ code.name|first|upper }}{% endif %}</div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Budget Code</p>
             <h1 id="code-page-title">{{ code.name }}</h1>
-            <p class="code-header-subtitle">{{ code.get_schedule_f_line_display }}</p>
-            <div class="code-header-meta">
-                <span class="code-header-shared">Shared code</span>
-                {% if code.code %}<span class="code-header-tag">{{ code.code }}</span>{% endif %}
-                <span class="code-header-tag">CODE-{{ code.pk|stringformat:"05d" }}</span>
-                <span class="code-header-tag">{{ item_data|length }} budget item{{ item_data|length|pluralize }}</span>
-                <span class="code-header-tag">{{ currency.code }}</span>
+            <p class="budget-header-subtitle">{{ code.get_schedule_f_line_display }}</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status">Shared code</span>
+                {% if code.code %}<span class="budget-header-tag">{{ code.code }}</span>{% endif %}
+                <span class="budget-header-tag">CODE-{{ code.pk|stringformat:"05d" }}</span>
+                <span class="budget-header-tag">{{ item_data|length }} budget item{{ item_data|length|pluralize }}</span>
+                <span class="budget-header-tag">{{ currency.code }}</span>
             </div>
         </div>
     </div>
     <div class="actions">
-        <a class="code-back" href="{% url 'model_list' app='expenses' model='category' %}">&larr; Back to Budget Codes</a>
+        <a class="budget-back" href="{% url 'model_list' app='expenses' model='category' %}">&larr; Back to Budget Codes</a>
         {% if can_edit_code %}<a class="btn btn-primary" href="{% url 'model_update' app='expenses' model='category' pk=code.pk %}" data-modal-url="{% url 'model_update' app='expenses' model='category' pk=code.pk %}?next={% url 'budget_code_detail' code.pk %}" data-modal-title="Edit Budget Code">Edit Code</a>{% endif %}
         <button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>
     </div>
 </header>
 
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Budget code sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-code-overview" aria-selected="true" aria-controls="code-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-code-subcodes" aria-selected="false" aria-controls="code-subcodes" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h7l2 3h7v11H4z"/><path d="M4 6v11"/></svg>SUBCODES</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-code-items" aria-selected="false" aria-controls="code-items" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>BUDGET ITEMS</button>
+</nav>
+
+<section class="budget-tab-panel" id="code-overview" role="tabpanel" aria-labelledby="tab-code-overview" tabindex="0">
 <div class="kpi-grid">
-    <div class="kpi-card">
-        <div class="kpi-icon slate">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-        </div>
-        <div>
-            <div class="kpi-value">{{ item_data|length }}</div>
-            <div class="kpi-label">Budget Items</div>
-        </div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-icon teal">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-        </div>
-        <div>
-            <div class="kpi-value">{{ total_fund|as_currency:currency }}</div>
-            <div class="kpi-label">Fund Pool</div>
-        </div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-icon blue">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-        </div>
-        <div>
-            <div class="kpi-value">{{ total_planned|as_currency:currency }}</div>
-            <div class="kpi-label">Planned</div>
-        </div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-icon amber">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-        </div>
-        <div>
-            <div class="kpi-value">{{ total_spent|as_currency:currency }}</div>
-            <div class="kpi-label">Spent</div>
-        </div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-icon {% if total_remaining < 0 %}red{% else %}green{% endif %}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-        </div>
-        <div>
-            <div class="kpi-value {% if total_remaining < 0 %}profit-neg{% else %}profit-pos{% endif %}">{{ total_remaining|as_currency:currency }}</div>
-            <div class="kpi-label">Fund Remaining</div>
-        </div>
-    </div>
+    <div class="kpi-card"><div><div class="kpi-label">Budget Items</div><div class="kpi-value">{{ item_data|length }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Fund Pool</div><div class="kpi-value">{{ total_fund|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Planned</div><div class="kpi-value">{{ total_planned|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Spent</div><div class="kpi-value">{{ total_spent|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Fund Remaining</div><div class="kpi-value {% if total_remaining < 0 %}balance-negative{% endif %}">{{ total_remaining|as_currency:currency }}</div></div></div>
 </div>
-
-<div class='budget-header'>
-    <div class="summary-card">
+<div class="reconciliation">
+    <article>
         <h3>Code Info</h3>
-        <div class="summary-row">
-            <span class="label">Code</span>
-            <span class="value">{{ code.code|default:"—" }}</span>
-        </div>
-        <div class="summary-row">
-            <span class="label">Name</span>
-            <span class="value">{{ code.name }}</span>
-        </div>
-        <div class="summary-row">
-            <span class="label">Budget Schedule Line</span>
-            <span class="value">{{ code.get_schedule_f_line_display }}</span>
-        </div>
-        {% if code.description %}
-        <div class="summary-row">
-            <span class="label">Description</span>
-            <span class="value" style="font-weight:400; font-size:0.8rem;">{{ code.description }}</span>
-        </div>
-        {% endif %}
-    </div>
-
-    <div class="summary-card">
+        <p><span>Code</span><strong>{{ code.code|default:"&mdash;" }}</strong></p>
+        <p><span>Name</span><strong>{{ code.name }}</strong></p>
+        <p><span>Budget Schedule Line</span><strong>{{ code.get_schedule_f_line_display }}</strong></p>
+        {% if code.description %}<p><span>Description</span><strong style="font-weight:400;">{{ code.description }}</strong></p>{% endif %}
+    </article>
+    <article>
         <h3>Fund Summary</h3>
-        <div class="summary-row">
-            <span class="label">Total Fund Pool</span>
-            <span class="value">{{ total_fund|as_currency:currency }}</span>
-        </div>
-        <div class="summary-row">
-            <span class="label">Total Planned</span>
-            <span class="value">{{ total_planned|as_currency:currency }}</span>
-        </div>
-        <div class="summary-row">
-            <span class="label">Total Spent</span>
-            <span class="value">{{ total_spent|as_currency:currency }}</span>
-        </div>
-        <div class="summary-row">
-            <span class="label">Fund Remaining</span>
-            <span class="value {% if total_remaining < 0 %}red{% else %}green{% endif %}">{{ total_remaining|as_currency:currency }}</span>
-        </div>
-    </div>
+        <p><span>Total fund pool</span><strong>{{ total_fund|as_currency:currency }}</strong></p>
+        <p><span>Total planned</span><strong>{{ total_planned|as_currency:currency }}</strong></p>
+        <p><span>Total spent</span><strong>{{ total_spent|as_currency:currency }}</strong></p>
+        <p><span>{% if total_remaining < 0 %}Fund overrun{% else %}Fund remaining{% endif %}</span><strong class="{% if total_remaining < 0 %}balance-negative{% endif %}">{{ total_remaining|as_currency:currency }}</strong></p>
+    </article>
 </div>
+{% if budget_segments %}
+<article class="alloc-chart">
+    <h3>Planned Allocation by Budget</h3>
+    <p class="burn-sub">How this code's planned expenditure is distributed across the budgets using it.</p>
+    {% include "reports/donut.html" with segments=budget_segments center_num=total_planned|as_currency_compact:currency center_lbl="Planned spend" %}
+</article>
+{% endif %}
+</section>
 
-<div class='table-card'>
+<section class="budget-tab-panel" id="code-subcodes" role="tabpanel" aria-labelledby="tab-code-subcodes" tabindex="0" hidden>
+<div class='table-card' style="border:none; padding:0; box-shadow:none;">
     <div class="table-card-head">
         <h3>Budget Subcodes</h3>
         <span class="row-count">{{ subcodes|length }} subcode{{ subcodes|length|pluralize }}</span>
@@ -207,8 +170,10 @@
     </div>
     {% endif %}
 </div>
+</section>
 
-<div class='table-card'>
+<section class="budget-tab-panel" id="code-items" role="tabpanel" aria-labelledby="tab-code-items" tabindex="0" hidden>
+<div class='table-card' style="border:none; padding:0; box-shadow:none;">
     <div class="table-card-head">
         <h3>Budget Items Using This Code</h3>
         <span class="row-count">{{ item_data|length }} item{{ item_data|length|pluralize }}</span>
@@ -269,4 +234,40 @@
     </div>
     {% endif %}
 </div>
+</section>
+</div>
+
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
 {% endblock %}

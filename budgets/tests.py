@@ -68,10 +68,10 @@ class BudgetNavigationTests(TestCase):
         self.farm.save()
         url = reverse('budget_code_detail', kwargs={'pk': category.pk})
         response = self.client.get(url)
-        self.assertContains(response, 'code-toolbar')
+        self.assertContains(response, 'budget-toolbar')
         self.assertContains(response, 'Back to Budget Codes')
         self.assertContains(response, 'Print')
-        header = response.content.decode().split('<header class="code-toolbar"', 1)[1].split('</header>', 1)[0]
+        header = response.content.decode().split('<header class="budget-toolbar"', 1)[1].split('</header>', 1)[0]
         for value in [category.name, category.code]:
             self.assertIn(value, header)
         for value in [self.farm.farm_name, self.farm.location, self.farm.phone, self.farm.email]:
@@ -460,3 +460,53 @@ class BudgetMigrationTests(TransactionTestCase):
         finally:
             MigrationExecutor(connection).migrate(all_leaf)
 
+
+
+class BudgetBurnChartTests(TestCase):
+    def setUp(self):
+        from datetime import date
+        from decimal import Decimal
+        from expenses.models import Category, Expense
+        from budgets.models import BudgetItem
+        self.user = User.objects.create_user(username='burn-owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Burn Farm')
+        self.budget = Budget.objects.create(
+            farm_profile=self.farm, name='FY26 Burn',
+            start_date=date(2026, 1, 1), end_date=date(2026, 4, 30))
+        category = Category.objects.create(name='Burn cat')
+        item = BudgetItem.objects.create(
+            budget=self.budget, category=category, line_code='B-1',
+            planned_amount=Decimal('1200'))
+        Expense.objects.create(
+            farm_profile=self.farm, budget_item=item, category=category,
+            date=date(2026, 1, 15), amount=Decimal('300'))
+        Expense.objects.create(
+            farm_profile=self.farm, budget_item=item, category=category,
+            date=date(2026, 3, 10), amount=Decimal('600'))
+        self.client.force_login(self.user)
+
+    def test_overview_shows_burn_chart(self):
+        from decimal import Decimal
+        response = self.client.get(
+            reverse('budget_detail', kwargs={'pk': self.budget.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<article class="burn-chart">')
+        self.assertContains(response, 'Spend vs Plan')
+        chart = response.context['burn_chart']
+        self.assertEqual(len(chart['rows']), 4)
+        self.assertEqual(chart['rows'][-1]['actual'], Decimal('900'))
+        self.assertEqual(chart['rows'][-1]['plan'], Decimal('1200'))
+        self.assertTrue(chart['has_actual'])
+        alloc = response.context['alloc_segments']
+        self.assertEqual(len(alloc), 1)
+        self.assertEqual(alloc[0]['share'], 100.0)
+        self.assertContains(response, 'Budget Allocation')
+
+    def test_chart_hidden_without_dates_or_expenses(self):
+        bare = Budget.objects.create(farm_profile=self.farm, name='Bare')
+        response = self.client.get(
+            reverse('budget_detail', kwargs={'pk': bare.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['burn_chart'])
+        self.assertNotContains(response, '<article class="burn-chart">')
+        self.assertNotContains(response, 'class="alloc-chart"')

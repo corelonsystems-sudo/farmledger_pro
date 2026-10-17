@@ -6,19 +6,62 @@
 
 {% block extra_head %}
 {% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
 <style>
-    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .settings-grid .wide { grid-column: 1 / -1; }
-    @media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
-    .section-table { width: 100%; border-collapse: collapse; }
-    .section-table th {
+    .settings-toolbar {
+        display: flex; align-items: center; justify-content: space-between; gap: 24px;
+        margin-bottom: 20px; padding: 24px; border: 1px solid #2d6a4f; border-radius: 14px;
+        background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 70%, #40916c 100%);
+        color: #fff; box-shadow: 0 10px 24px rgba(27, 67, 50, 0.18);
+    }
+    .settings-identity { display: flex; align-items: center; gap: 16px; min-width: 0; }
+    .settings-avatar {
+        width: 54px; height: 54px; border-radius: 12px; background: rgba(255,255,255,.14);
+        display: grid; place-items: center; font-size: 1.5rem; font-weight: 800; color: #d8f3dc;
+        border: 1px solid rgba(255,255,255,.25); overflow: hidden; flex: none;
+    }
+    .settings-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .settings-eyebrow { margin: 0 0 2px; font-size: .66rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #b7e4c7; }
+    .settings-toolbar h1 { margin: 0 0 6px; font-size: 1.45rem; color: #fff; }
+    .settings-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+    .settings-tag {
+        display: inline-flex; align-items: center; gap: 6px; font-size: .7rem; font-weight: 600;
+        padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.12);
+        border: 1px solid rgba(255,255,255,.22); color: #e9f5ee; white-space: nowrap;
+    }
+    .settings-toolbar .actions { display: flex; gap: 10px; flex: none; }
+    .settings-toolbar .btn-secondary { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.35); color: #fff; }
+    .settings-toolbar .btn-secondary:hover { background: rgba(255,255,255,.2); }
+    .settings-tabs { display: flex; gap: 2px; border-bottom: 2px solid var(--border); margin-bottom: 18px; overflow-x: auto; }
+    .farm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .farm-card {
+        background: linear-gradient(180deg, #f7faf8, #f1f6f3); border: 1px solid #d4dcd7;
+        border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .farm-card-head { display: flex; align-items: center; gap: 12px; }
+    .farm-card-logo { width: 44px; height: 44px; border-radius: 10px; background: #1b4332; color: #d8f3dc; display: grid; place-items: center; font-weight: 800; font-size: 1.1rem; overflow: hidden; flex: none; }
+    .farm-card-logo img { width: 100%; height: 100%; object-fit: cover; }
+    .farm-card-head h3 { margin: 0; font-size: 1rem; color: #1b4332; }
+    .farm-card-head .muted { font-size: .72rem; }
+    .farm-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: .78rem; }
+    .farm-card dt { color: var(--text-muted); font-weight: 600; }
+    .farm-card dd { margin: 0; text-align: right; font-weight: 600; color: var(--text); }
+    .farm-card-foot { display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed #d4dcd7; padding-top: 10px; margin-top: auto; }
+    .first-farm-callout {
+        background: #f0fdf4; border: 1px dashed #74c69d; border-radius: 12px;
+        padding: 28px; text-align: center;
+    }
+    .first-farm-callout h3 { margin: 0 0 6px; color: #1b4332; }
+    .first-farm-callout p { margin: 0 0 14px; color: var(--text-muted); font-size: .82rem; }
+    .settings-table { width: 100%; border-collapse: collapse; }
+    .settings-table th {
         text-align: left; color: var(--text-muted); font-size: 0.68rem; font-weight: 700;
         padding: 8px 12px; border-bottom: 1px solid var(--border);
         text-transform: uppercase; letter-spacing: 0.04em; background: #f8fafc; white-space: nowrap;
     }
-    .section-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
-    .section-table tbody tr:last-child td { border-bottom: none; }
-    .section-table tbody tr:hover td { background: #f8fafc; }
+    .settings-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+    .settings-table tbody tr:last-child td { border-bottom: none; }
+    .settings-table tbody tr:hover td { background: #f8fafc; }
     .muted { color: var(--text-muted); }
     .row-actions { display: inline-flex; gap: 6px; }
     .mini-btn {
@@ -33,165 +76,324 @@
     .pill-blue { background: #dbeafe; color: #1e40af; }
     .pill-amber { background: #fef3c7; color: #92400e; }
     .pill-slate { background: #e2e8f0; color: #475569; }
-    .farm-logo { width: 30px; height: 30px; border-radius: 6px; object-fit: cover; vertical-align: middle; margin-right: 8px; }
-    .add-btn {
-        background: var(--primary); color: #fff; border: none; border-radius: 7px;
-        padding: 6px 12px; font-size: 0.74rem; font-weight: 600; cursor: pointer; text-decoration: none;
+    .user-avatar {
+        width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; color: #475569;
+        display: inline-grid; place-items: center; font-size: .68rem; font-weight: 700; margin-right: 8px; vertical-align: middle;
     }
-    .add-btn:hover { background: var(--primary-dark); }
+    .settings-messages { margin-bottom: 16px; }
+    .settings-msg { padding: 10px 14px; border-radius: 8px; font-size: .8rem; margin-bottom: 8px; }
+    .settings-msg.success { background: #d8f3dc; color: #1b4332; border: 1px solid #95d5b2; }
+    .settings-msg.error { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+    .settings-msg.warning, .settings-msg.info { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 900px) { .db-grid { grid-template-columns: 1fr; } }
+    .db-card {
+        background: linear-gradient(180deg, #f7faf8, #f1f6f3); border: 1px solid #d4dcd7;
+        border-radius: 12px; padding: 18px;
+    }
+    .db-card h3 { margin: 0 0 2px; font-size: .92rem; color: #1b4332; }
+    .db-card .db-sub { margin: 0 0 12px; font-size: .72rem; color: #64748b; }
+    .db-info { background: #fff; border: 1px solid #e3ebe6; border-radius: 8px; padding: 4px 14px; margin-bottom: 14px; }
+    .db-info-row { display: flex; justify-content: space-between; gap: 14px; padding: 8px 0; border-bottom: 1px dashed var(--border); font-size: .8rem; }
+    .db-info-row:last-child { border-bottom: none; }
+    .db-info-row span { color: var(--text-muted); flex: none; }
+    .db-info-row strong { font-weight: 600; word-break: break-all; text-align: right; }
+    .db-path-row { flex-direction: column; gap: 3px; }
+    .db-path-row strong { text-align: left; font-size: .74rem; font-family: ui-monospace, Consolas, monospace; color: #536259; }
+    .db-card-foot { display: flex; flex-direction: column; gap: 8px; }
+    .db-card-foot .db-hint { font-size: .7rem; color: #8a988f; }
+    .db-warning {
+        background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; border-radius: 8px;
+        padding: 12px 14px; font-size: .78rem; line-height: 1.55; margin-bottom: 14px;
+    }
+    .db-warning code { background: rgba(146, 64, 14, .1); padding: 1px 5px; border-radius: 4px; }
+    .db-import { display: flex; flex-direction: column; gap: 12px; }
+    .db-file-drop {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+        border: 2px dashed #b7c9bd; border-radius: 10px; background: #fff;
+        padding: 22px 14px; cursor: pointer; text-align: center; transition: border-color .15s ease, background .15s ease;
+    }
+    .db-file-drop:hover, .db-file-drop:focus-within { border-color: #2d6a4f; background: #f4faf6; }
+    .db-file-drop input[type="file"] { max-width: 100%; font-size: .74rem; color: #536259; }
+    .db-file-drop input[type="file"]::file-selector-button {
+        background: #1b4332; color: #fff; border: none; border-radius: 6px;
+        padding: 6px 12px; font-size: .72rem; font-weight: 600; margin-right: 10px; cursor: pointer;
+    }
+    .db-drop-hint { font-size: .7rem; color: #8a988f; }
+    .db-confirm { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: var(--text); }
+    .db-confirm input { width: 16px; height: 16px; accent-color: var(--primary); flex: none; }
+    .db-import .btn-danger { align-self: flex-start; }
+    @media (max-width: 700px) { .settings-toolbar { flex-direction: column; align-items: flex-start; } }
+    @media print { .sidebar, .topbar, .settings-toolbar .actions { display: none !important; } }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="settings-grid">
-
-    {# -- Farm Profiles -- #}
-    <div class="table-card wide">
-        <div class="table-card-head">
-            <h3>Farm Profiles</h3>
-            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmprofile' %}?next=/dashboard/settings/" data-modal-title="New Farm">+ New Farm</a>
+<header class="settings-toolbar" aria-labelledby="settings-page-title">
+    <div class="settings-identity">
+        <div class="settings-avatar" aria-hidden="true">
+            {% if farms.first.logo %}<img src="{{ farms.first.logo.url }}" alt="">{% else %}F{% endif %}
         </div>
-        {% if farms %}
-        <div style="overflow-x:auto;">
-        <table class="section-table">
-            <thead>
-                <tr><th>Farm</th><th>Location</th><th>Acreage</th><th>Phone</th><th>Currency</th><th>Owner</th><th style="text-align:right;">Actions</th></tr>
-            </thead>
-            <tbody>
-                {% for farm in farms %}
-                <tr>
-                    <td>
-                        {% if farm.logo %}<img class="farm-logo" src="{{ farm.logo.url }}" alt="">{% endif %}
-                        <strong>{{ farm.farm_name }}</strong>
-                    </td>
-                    <td class="muted">{{ farm.location|default:"-" }}</td>
-                    <td>{{ farm.acreage }}</td>
-                    <td class="muted">{{ farm.phone|default:"-" }}</td>
-                    <td>{{ farm.default_currency.code|default:"-" }}</td>
-                    <td class="muted">{{ farm.user.username }}</td>
-                    <td style="text-align:right;">
-                        {% if can_edit_farms %}
-                        <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmprofile' pk=farm.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ farm.farm_name }}">Edit</a>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div>
+            <p class="settings-eyebrow">Administration</p>
+            <h1 id="settings-page-title">Farm Settings</h1>
+            <div class="settings-meta">
+                <span class="settings-tag">{{ farms|length }} farm{{ farms|length|pluralize }}</span>
+                <span class="settings-tag">{{ memberships|length }} team member{{ memberships|length|pluralize }}</span>
+                <span class="settings-tag">{{ currency.code }} &middot; {{ currency.name }}</span>
+                <span class="settings-tag">Your role: {{ role_label }}</span>
+            </div>
         </div>
-        {% else %}
-        <div class="empty-state"><p>No farm profile yet</p><span>Create one to get started.</span></div>
-        {% endif %}
     </div>
-
-    {# -- Farm Team -- #}
-    <div class="table-card">
-        <div class="table-card-head">
-            <h3>Farm Team</h3>
-            {% if can_manage_team %}
-            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmmembership' %}?next=/dashboard/settings/" data-modal-title="Add Farm Member">+ Add Member</a>
-            {% endif %}
-        </div>
-        {% if memberships %}
-        <div style="overflow-x:auto;">
-        <table class="section-table">
-            <thead>
-                <tr><th>Farm</th><th>Member</th><th>Role</th><th style="text-align:right;">Actions</th></tr>
-            </thead>
-            <tbody>
-                {% for m in memberships %}
-                <tr>
-                    <td>{{ m.farm_profile.farm_name }}</td>
-                    <td>
-                        <strong>{{ m.user.username }}</strong>
-                        {% if m.user.first_name or m.user.last_name %}<span class="muted">({{ m.user.get_full_name }})</span>{% endif %}
-                    </td>
-                    <td><span class="pill-badge {% if m.role == 'OWNER' %}pill-green{% elif m.role == 'MANAGER' %}pill-blue{% elif m.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{{ m.get_role_display }}</span></td>
-                    <td style="text-align:right;">
-                        {% if can_manage_team %}
-                        <div class="row-actions">
-                            <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Edit Membership">Edit</a>
-                            <a class="mini-btn danger" href="javascript:void(0)" data-modal-url="{% url 'model_delete' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Remove Member">Remove</a>
-                        </div>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        </div>
-        {% else %}
-        <div class="empty-state"><p>No team members</p><span>Add users to share farm access.</span></div>
+    <div class="actions">
+        {% if can_edit_farms %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmprofile' %}?next=/dashboard/settings/" data-modal-title="New Farm">+ New Farm</a>
         {% endif %}
+        <button class="btn btn-secondary" type="button" onclick="window.print()">Print</button>
     </div>
+</header>
 
-    {# -- Users -- #}
-    <div class="table-card">
-        <div class="table-card-head">
-            <h3>Users</h3>
-            {% if can_manage_users %}
-            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='user' %}?next=/dashboard/settings/" data-modal-title="New User">+ New User</a>
-            {% endif %}
-        </div>
-        {% if users %}
-        <div style="overflow-x:auto;">
-        <table class="section-table">
-            <thead>
-                <tr><th>Username</th><th>Name</th><th>Role</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-                {% for u in users %}
-                <tr>
-                    <td><strong>{{ u.username }}</strong></td>
-                    <td class="muted">{{ u.get_full_name|default:"-" }}</td>
-                    <td><span class="pill-badge {% if u.is_superuser %}pill-green{% elif u.role == 'MANAGER' %}pill-blue{% elif u.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{% if u.is_superuser %}Administrator{% else %}{{ u.get_role_display }}{% endif %}</span></td>
-                    <td>{% if u.is_active %}<span class="pill-badge pill-green">Active</span>{% else %}<span class="pill-badge pill-slate">Inactive</span>{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        </div>
-        {% else %}
-        <div class="empty-state"><p>No users</p></div>
-        {% endif %}
-    </div>
-
-    {# -- Currencies -- #}
-    <div class="table-card wide">
-        <div class="table-card-head">
-            <h3>Currencies</h3>
-            {% if can_manage_currencies %}
-            <a class="add-btn" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='currency' %}?next=/dashboard/settings/" data-modal-title="New Currency">+ New Currency</a>
-            {% endif %}
-        </div>
-        {% if currencies %}
-        <div style="overflow-x:auto;">
-        <table class="section-table">
-            <thead>
-                <tr><th>Code</th><th>Name</th><th>Symbol</th><th>Rate (per USD)</th><th>Default</th><th style="text-align:right;">Actions</th></tr>
-            </thead>
-            <tbody>
-                {% for cur in currencies %}
-                <tr>
-                    <td><strong>{{ cur.code }}</strong></td>
-                    <td>{{ cur.name }}</td>
-                    <td>{{ cur.symbol }}</td>
-                    <td class="muted">{{ cur.rate }}</td>
-                    <td>{% if cur.is_default %}<span class="pill-badge pill-green">Default</span>{% endif %}</td>
-                    <td style="text-align:right;">
-                        {% if can_manage_currencies %}
-                        <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='currency' pk=cur.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ cur.code }}">Edit</a>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        </div>
-        {% else %}
-        <div class="empty-state"><p>No currencies configured</p></div>
-        {% endif %}
-    </div>
-
+<div class="kpi-grid">
+    <div class="kpi-card"><div><div class="kpi-label">Farm Profiles</div><div class="kpi-value">{{ farms|length }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Team Members</div><div class="kpi-value">{{ memberships|length }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">User Accounts</div><div class="kpi-value">{{ users|length }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Currencies</div><div class="kpi-value">{{ currencies|length }}</div></div></div>
 </div>
+
+{% if messages %}
+<div class="settings-messages">
+    {% for message in messages %}
+    <div class="settings-msg {{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="settings-tabs" role="tablist" aria-label="Settings sections">
+    <button type="button" class="budget-tab active" data-tab="profile" onclick="switchSettingsTab('profile')">FARM PROFILE</button>
+    <button type="button" class="budget-tab" data-tab="team" onclick="switchSettingsTab('team')">TEAM</button>
+    <button type="button" class="budget-tab" data-tab="users" onclick="switchSettingsTab('users')">USERS</button>
+    <button type="button" class="budget-tab" data-tab="currencies" onclick="switchSettingsTab('currencies')">CURRENCIES</button>
+    {% if request.user.is_superuser %}
+    <button type="button" class="budget-tab" data-tab="database" onclick="switchSettingsTab('database')">DATABASE</button>
+    {% endif %}
+</div>
+
+{# -- Farm Profiles -- #}
+<div id="tab-profile" class="tab-pane active">
+    {% if farms %}
+    <div class="farm-cards">
+        {% for farm in farms %}
+        <article class="farm-card">
+            <div class="farm-card-head">
+                <div class="farm-card-logo" aria-hidden="true">{% if farm.logo %}<img src="{{ farm.logo.url }}" alt="">{% else %}{{ farm.farm_name|first|upper }}{% endif %}</div>
+                <div>
+                    <h3>{{ farm.farm_name }}</h3>
+                    <span class="muted">Owned by {{ farm.user.get_full_name|default:farm.user.username }}</span>
+                </div>
+            </div>
+            <dl>
+                <dt>Location</dt><dd>{{ farm.location|default:"&ndash;" }}</dd>
+                <dt>Acreage</dt><dd>{{ farm.acreage|default:"&ndash;" }}</dd>
+                <dt>Phone</dt><dd>{{ farm.phone|default:"&ndash;" }}</dd>
+                <dt>Email</dt><dd>{{ farm.email|default:"&ndash;" }}</dd>
+                <dt>Currency</dt><dd>{{ farm.default_currency.code|default:"&ndash;" }}</dd>
+            </dl>
+            <div class="farm-card-foot">
+                <span class="pill-badge pill-green">{{ farm.membership_count }} member{{ farm.membership_count|pluralize }}</span>
+                {% if can_edit_farms %}
+                <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmprofile' pk=farm.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ farm.farm_name }}">Edit Farm</a>
+                {% endif %}
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="first-farm-callout">
+        <h3>Create your first farm profile</h3>
+        <p>Your account has no farm yet. Set up the farm profile to start recording fields, crops, livestock and finances.</p>
+        {% if can_edit_farms %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmprofile' %}?next=/dashboard/settings/" data-modal-title="New Farm">+ Create Farm Profile</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+{# -- Farm Team -- #}
+<div id="tab-team" class="tab-pane">
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Farm Team</h3>
+        {% if can_manage_team %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='farmmembership' %}?next=/dashboard/settings/" data-modal-title="Add Farm Member">+ Add Member</a>
+        {% endif %}
+    </div>
+    {% if memberships %}
+    <div style="overflow-x:auto;">
+    <table class="settings-table">
+        <thead>
+            <tr><th>Farm</th><th>Member</th><th>Role</th><th style="text-align:right;">Actions</th></tr>
+        </thead>
+        <tbody>
+            {% for m in memberships %}
+            <tr>
+                <td>{{ m.farm_profile.farm_name }}</td>
+                <td>
+                    <span class="user-avatar" aria-hidden="true">{{ m.user.username|first|upper }}</span><strong>{{ m.user.username }}</strong>
+                    {% if m.user.first_name or m.user.last_name %}<span class="muted">({{ m.user.get_full_name }})</span>{% endif %}
+                </td>
+                <td><span class="pill-badge {% if m.role == 'OWNER' %}pill-green{% elif m.role == 'MANAGER' %}pill-blue{% elif m.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{{ m.get_role_display }}</span></td>
+                <td style="text-align:right;">
+                    {% if can_manage_team %}
+                    <div class="row-actions">
+                        <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Edit Membership">Edit</a>
+                        <a class="mini-btn danger" href="javascript:void(0)" data-modal-url="{% url 'model_delete' app='accounts' model='farmmembership' pk=m.pk %}?next=/dashboard/settings/" data-modal-title="Remove Member">Remove</a>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No team members</p><span>Add users to share farm access.</span></div>
+    {% endif %}
+</div>
+</div>
+
+{# -- Users -- #}
+<div id="tab-users" class="tab-pane">
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>User Accounts</h3>
+        {% if can_manage_users %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='user' %}?next=/dashboard/settings/" data-modal-title="New User">+ New User</a>
+        {% endif %}
+    </div>
+    {% if users %}
+    <div style="overflow-x:auto;">
+    <table class="settings-table">
+        <thead>
+            <tr><th>Username</th><th>Name</th><th>Role</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td><span class="user-avatar" aria-hidden="true">{{ u.username|first|upper }}</span><strong>{{ u.username }}</strong></td>
+                <td class="muted">{{ u.get_full_name|default:"-" }}</td>
+                <td><span class="pill-badge {% if u.is_superuser %}pill-green{% elif u.role == 'MANAGER' %}pill-blue{% elif u.role == 'ACCOUNTANT' %}pill-amber{% else %}pill-slate{% endif %}">{% if u.is_superuser %}Administrator{% else %}{{ u.get_role_display }}{% endif %}</span></td>
+                <td>{% if u.is_active %}<span class="pill-badge pill-green">Active</span>{% else %}<span class="pill-badge pill-slate">Inactive</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No users</p></div>
+    {% endif %}
+</div>
+</div>
+
+{# -- Currencies -- #}
+<div id="tab-currencies" class="tab-pane">
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>Currencies</h3>
+        {% if can_manage_currencies %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{% url 'model_create' app='accounts' model='currency' %}?next=/dashboard/settings/" data-modal-title="New Currency">+ New Currency</a>
+        {% endif %}
+    </div>
+    {% if currencies %}
+    <div style="overflow-x:auto;">
+    <table class="settings-table">
+        <thead>
+            <tr><th>Code</th><th>Name</th><th>Symbol</th><th>Rate (per USD)</th><th>Default</th><th style="text-align:right;">Actions</th></tr>
+        </thead>
+        <tbody>
+            {% for cur in currencies %}
+            <tr>
+                <td><strong>{{ cur.code }}</strong></td>
+                <td>{{ cur.name }}</td>
+                <td>{{ cur.symbol }}</td>
+                <td class="muted">{{ cur.rate }}</td>
+                <td>{% if cur.is_default %}<span class="pill-badge pill-green">Default</span>{% endif %}</td>
+                <td style="text-align:right;">
+                    {% if can_manage_currencies %}
+                    <a class="mini-btn" href="javascript:void(0)" data-modal-url="{% url 'model_update' app='accounts' model='currency' pk=cur.pk %}?next=/dashboard/settings/" data-modal-title="Edit {{ cur.code }}">Edit</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No currencies configured</p></div>
+    {% endif %}
+</div>
+</div>
+
+{# -- Database file (superusers) -- #}
+{% if request.user.is_superuser %}
+<div id="tab-database" class="tab-pane">
+    {% if db_info %}
+    <div class="db-grid">
+        <article class="db-card">
+            <h3>Current database</h3>
+            <p class="db-sub">The live SQLite file powering this FarmLedger installation.</p>
+            <div class="db-info">
+                <div class="db-info-row"><span>Engine</span><strong>SQLite</strong></div>
+                <div class="db-info-row"><span>Size</span><strong>{{ db_info.size }}</strong></div>
+                <div class="db-info-row"><span>Last modified</span><strong>{{ db_info.modified }}</strong></div>
+                <div class="db-info-row db-path-row"><span>File</span><strong class="db-path">{{ db_info.path }}</strong></div>
+            </div>
+            <div class="db-card-foot">
+                <a class="btn btn-primary" href="{% url 'database_export' %}">Download database file</a>
+                <span class="db-hint">Complete snapshot &mdash; all farms, records, users and settings.</span>
+            </div>
+        </article>
+        <article class="db-card">
+            <h3>Import a database file</h3>
+            <p class="db-sub">Restore from a previously downloaded FarmLedger database.</p>
+            <div class="db-warning">
+                <strong>Import replaces the entire database.</strong> Every farm, record, user and
+                setting is overwritten by the uploaded file. Uploads are validated (SQLite format,
+                integrity check, FarmLedger tables) and the current database is automatically backed
+                up to <code>backups/</code> before the swap. Media files (photos) are not part of
+                the database and are unaffected. Restart the dev server after importing.
+            </div>
+            <form class="db-import" method="post" action="{% url 'database_import' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <label class="db-file-drop">
+                    <input type="file" name="dbfile" accept=".sqlite3,.db" required>
+                    <span class="db-drop-hint">Choose a .sqlite3 file to upload</span>
+                </label>
+                <label class="db-confirm">
+                    <input type="checkbox" name="confirm" value="1" required>
+                    I understand this overwrites the current database.
+                </label>
+                <button class="btn btn-danger" type="submit">Import & replace database</button>
+            </form>
+        </article>
+    </div>
+    {% else %}
+    <div class="table-card">
+        <div class="empty-state"><p>File export/import unavailable</p><span>Database file transfer requires the SQLite backend (FARMLEDGER_USE_SQLITE=1).</span></div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+function switchSettingsTab(tabName) {
+    document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.settings-tabs .budget-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    document.querySelector('.settings-tabs [data-tab=' + tabName + ']').classList.add('active');
+}
+(function() {
+    var wanted = new URLSearchParams(window.location.search).get('tab');
+    if (wanted && document.getElementById('tab-' + wanted)) switchSettingsTab(wanted);
+})();
+</script>
 {% endblock %}

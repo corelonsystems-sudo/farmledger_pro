@@ -750,3 +750,143 @@ class CropIntegrityTests(TestCase):
         self.assertEqual(
             self.client.get(
                 reverse('customer_detail', args=[customer.pk])).status_code, 404)
+
+
+class SalePaymentTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Farm X')
+        other_farm = FarmProfile.objects.create(
+            user=User.objects.create_user(username='other', password='pw'))
+        field = Field.objects.create(farm_profile=self.farm, name='F1', acreage=Decimal('2'))
+        other_field = Field.objects.create(farm_profile=other_farm, name='F9', acreage=Decimal('2'))
+        crop = Crop.objects.create(name='Beans Y', default_unit='kg')
+        season = CropSeason.objects.create(
+            field=field, crop=crop, planting_date=date(2025, 1, 1))
+        other_season = CropSeason.objects.create(
+            field=other_field, crop=crop, planting_date=date(2025, 1, 1))
+        self.harvest = HarvestRecord.objects.create(
+            crop_season=season, harvest_date=date(2025, 6, 1),
+            quantity=Decimal('100'), unit='kg')
+        other_harvest = HarvestRecord.objects.create(
+            crop_season=other_season, harvest_date=date(2025, 6, 1),
+            quantity=Decimal('50'), unit='kg')
+        self.sale = Sale.objects.create(
+            harvest=self.harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('10'), unit='kg', unit_price=Decimal('10'),
+            payment_status='UNPAID')
+        self.other_sale = Sale.objects.create(
+            harvest=other_harvest, sale_date=date(2025, 7, 1),
+            quantity=Decimal('5'), unit='kg', unit_price=Decimal('2'),
+            payment_status='UNPAID')
+        self.client.force_login(self.user)
+        self.url = reverse('sale_record_payment', args=[self.sale.pk])
+
+    def test_partial_payment_marks_partial(self):
+        response = self.client.post(self.url, {'amount': '40'})
+        self.assertEqual(response.status_code, 302)
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.amount_received, Decimal('40'))
+        self.assertEqual(self.sale.payment_status, 'PARTIAL')
+        self.assertEqual(self.sale.receivable, Decimal('60'))
+
+    def test_full_payment_marks_paid(self):
+        self.client.post(self.url, {'amount': '100'})
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.payment_status, 'PAID')
+        self.assertEqual(self.sale.amount_received, Decimal('100'))
+        self.assertEqual(self.sale.receivable, Decimal('0'))
+
+    def test_overpayment_rejected(self):
+        response = self.client.post(self.url, {'amount': '500'})
+        self.assertEqual(response.status_code, 200)  # form error
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.amount_received, Decimal('0'))
+
+    def test_payment_is_farm_scoped(self):
+        response = self.client.post(
+            reverse('sale_record_payment', args=[self.other_sale.pk]),
+            {'amount': '5'})
+        self.assertEqual(response.status_code, 404)
+
+
+class CropDetailChartTests(TestCase):
+    """Crop detail renders the SVG revenue/cost line chart, the quantity donut
+    and the stages-of-production flow from a harvest -> stage -> sale chain."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='chart-owner', password='pw')
+        farm = FarmProfile.objects.create(user=self.user, farm_name='Chart Farm')
+        field = Field.objects.create(farm_profile=farm, name='C1', acreage=Decimal('1'))
+        self.crop = Crop.objects.create(name='Coffee', default_unit='kg')
+        season = CropSeason.objects.create(field=field, crop=self.crop, planting_date=date(2025, 1, 1))
+        self.harvest = HarvestRecord.objects.create(
+            crop_season=season, harvest_date=date(2025, 6, 1), quantity=Decimal('100'), unit='kg')
+        self.stage = ProcessingStage.objects.create(
+            harvest=self.harvest, name='Drying', sequence=1,
+            input_quantity=Decimal('60'), output_quantity=Decimal('50'), output_unit='kg',
+            cost=Decimal('200'))
+        Sale.objects.create(harvest=self.harvest, sale_date=date(2025, 7, 1),
+                            quantity=Decimal('30'), unit_price=Decimal('10'))
+        Sale.objects.create(harvest=self.harvest, processing_stage=self.stage,
+                            sale_date=date(2025, 7, 5), quantity=Decimal('20'), unit_price=Decimal('25'))
+        self.client.force_login(self.user)
+
+    def test_charts_render_from_production_chain(self):
+        response = self.client.get(reverse('crop_detail', kwargs={'pk': self.crop.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'chart.js')
+        # Default view: sold vs in-store across the months of the latest active year.
+        chart = response.context['line_chart']
+        self.assertEqual(len(chart['rows']), 12)
+        self.assertEqual(chart['rows'][6]['sold'], Decimal('50'))      # Jul: 30 raw + 20 processed
+        self.assertEqual(chart['rows'][5]['in_store'], Decimal('90'))  # Jun: 100 - 10 lost
+        self.assertEqual(chart['rows'][6]['in_store'], Decimal('40'))  # Jul: 100 - 50 sold - 10 lost
+        self.assertEqual(chart['rows'][11]['in_store'], Decimal('40'))
+        self.assertContains(response, 'class="burn-line"')
+        self.assertContains(response, 'chart-filters')
+
+        segs = {s['label']: s['total'] for s in response.context['qty_segments']}
+        self.assertEqual(segs['Raw Sold'], Decimal('30'))
+        self.assertEqual(segs['Processed Sold'], Decimal('20'))
+        self.assertEqual(segs['Processed in Store'], Decimal('30'))
+        self.assertEqual(segs['Raw in Store'], Decimal('10'))
+        self.assertEqual(segs['Depreciated'], Decimal('10'))
+        self.assertContains(response, 'class="donut"')
+
+        flow = response.context['stage_flow']
+        self.assertEqual([r['label'] for r in flow], ['Harvested (raw)', '1. Drying'])
+        raw, drying = flow
+        self.assertEqual((raw['qty'], raw['sold'], raw['in_store'], raw['passed_on']),
+                         (Decimal('100'), Decimal('30'), Decimal('10'), Decimal('60')))
+        self.assertEqual((drying['qty'], drying['sold'], drying['in_store'], drying['lost']),
+                         (Decimal('50'), Decimal('20'), Decimal('30'), Decimal('10')))
+        self.assertContains(response, 'Stages of Production')
+
+    def test_chart_filters_narrow_the_series(self):
+        url = reverse('crop_detail', kwargs={'pk': self.crop.pk})
+        # Stage filter: only the stage's processed sale counts as sold.
+        resp = self.client.get(url, {'stage': 'Drying'})
+        chart = resp.context['line_chart']
+        self.assertEqual(chart['rows'][6]['sold'], Decimal('20'))
+        self.assertEqual(chart['rows'][6]['in_store'], Decimal('70'))  # 100 - 20 sold - 10 lost
+        # Season filter with no harvests in it -> no chart.
+        other_field = Field.objects.create(
+            farm_profile=FarmProfile.objects.get(user=self.user), name='C2',
+            acreage=Decimal('1'))
+        empty_season = CropSeason.objects.create(
+            field=other_field, crop=self.crop, planting_date=date(2025, 3, 1))
+        resp = self.client.get(url, {'season': empty_season.pk})
+        self.assertIsNone(resp.context['line_chart'])
+        # Unknown year falls back to the latest active year.
+        resp = self.client.get(url, {'year': '1999'})
+        self.assertEqual(resp.context['chart_filters']['year'], '2025')
+
+    def test_empty_crop_shows_placeholders(self):
+        bare = Crop.objects.create(name='Bare', default_unit='kg')
+        response = self.client.get(reverse('crop_detail', kwargs={'pk': bare.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['line_chart'])
+        self.assertEqual(response.context['qty_segments'], [])
+        self.assertEqual(response.context['stage_flow'], [])
+        self.assertContains(response, 'No dated activity for this selection')

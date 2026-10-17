@@ -68,6 +68,7 @@ def sync_sale_income(sale):
         'amount': sale.total_amount,
         'date': sale.sale_date,
         'customer': sale.buyer,
+        'customer_ref': sale.customer,
         'payment_method': PAYMENT_METHOD_MAP.get(sale.payment_method, 'OTHER'),
     }
 

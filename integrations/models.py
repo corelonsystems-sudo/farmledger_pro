@@ -38,9 +38,28 @@ class BankTransaction(models.Model):
         blank=True,
         related_name='matched_bank_transactions',
     )
+    matched_income = models.ForeignKey(
+        'income.Income',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='matched_bank_transactions',
+    )
     is_reconciled = models.BooleanField(default=False)
     is_flagged = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        farm = self.bank_account.farm_profile_id if self.bank_account_id else None
+        if farm and self.matched_expense_id and self.matched_expense.farm_profile_id != farm:
+            raise ValidationError({'matched_expense': 'Expense belongs to another farm.'})
+        if farm and self.matched_income_id and self.matched_income.farm_profile_id != farm:
+            raise ValidationError({'matched_income': 'Income belongs to another farm.'})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.date} - {self.description[:50]} - ${self.amount}'

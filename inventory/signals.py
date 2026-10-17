@@ -42,6 +42,9 @@ def handle_inventory_transaction(sender, instance, created, **kwargs):
         )
         item.quantity_on_hand = F('quantity_on_hand') + instance.quantity
         item.save(update_fields=['quantity_on_hand', 'updated_at'])
+        item.refresh_from_db(fields=['quantity_on_hand'])
+        if item.quantity_on_hand > item.reorder_threshold:
+            InventoryAlert.objects.filter(item=item, is_resolved=False).update(is_resolved=True)
         InventoryTransaction.objects.filter(pk=instance.pk).update(expense=expense)
         instance.expense = expense
 
@@ -71,3 +74,5 @@ def handle_inventory_transaction(sender, instance, created, **kwargs):
     elif instance.transaction_type == InventoryTransaction.TransactionType.ADJUSTMENT:
         item.quantity_on_hand = instance.quantity
         item.save(update_fields=['quantity_on_hand', 'updated_at'])
+        if item.quantity_on_hand > item.reorder_threshold:
+            InventoryAlert.objects.filter(item=item, is_resolved=False).update(is_resolved=True)

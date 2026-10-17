@@ -1,23 +1,29 @@
-{% comment %}Shared donut chart with external labels, leader lines and legend chips.
+{% comment %}Shared donut chart with exploded lead segment, leader lines, two-line
+     percentage labels and legend chips.
      Usage: {% include "reports/donut.html" with segments=rows center_num="UGX 8.0M" center_lbl="Total" %}{% endcomment %}
 {% if segments %}
 <div class="donut-layout">
-    <svg class="donut" viewBox="0 -4 100 50" role="img">
-        <circle cx="50" cy="21" r="15.915" fill="transparent" stroke="#e2e8f0" stroke-width="5"></circle>
+    <svg class="donut" viewBox="0 -6 100 56" role="img">
+        <circle cx="50" cy="21" r="15.915" fill="transparent" stroke="#e9f0eb" stroke-width="5"></circle>
         {% for seg in segments %}
         <circle class="seg" cx="50" cy="21" r="15.915" fill="transparent"
                 stroke="{{ seg.color }}" stroke-width="5"
-                stroke-dasharray="{{ seg.dash }}" stroke-dashoffset="{{ seg.dashoffset }}">
+                stroke-dasharray="{{ seg.dash }}" stroke-dashoffset="{{ seg.dashoffset }}"
+                {% if seg.explode_x or seg.explode_y %}transform="translate({{ seg.explode_x }},{{ seg.explode_y }})"{% endif %}>
             <title>{{ seg.label }}: {{ seg.share }}%</title>
         </circle>
         {% endfor %}
+        <circle cx="50" cy="21" r="9.5" fill="#ffffff" opacity="0.92"/>
         <text x="50" y="19.5" text-anchor="middle" class="donut-center-num">{{ center_num }}</text>
         <text x="50" y="24.5" text-anchor="middle" class="donut-center-lbl">{{ center_lbl }}</text>
         {% for seg in segments %}
         {% if seg.show_label %}
-        <line class="donut-leader" x1="{{ seg.px }}" y1="{{ seg.py }}" x2="{{ seg.ex }}" y2="{{ seg.ey }}" stroke="{{ seg.color }}" stroke-width="0.35"/>
-        <circle cx="{{ seg.px }}" cy="{{ seg.py }}" r="0.9" fill="#fff" stroke="{{ seg.color }}" stroke-width="0.7"/>
-        <text x="{{ seg.lx }}" y="{{ seg.ly }}" text-anchor="{{ seg.anchor }}" class="donut-label">{{ seg.label }} &middot; {{ seg.share }}%</text>
+        <polyline class="donut-leader" points="{{ seg.px }},{{ seg.py }} {{ seg.ex }},{{ seg.ey }} {{ seg.lx }},{{ seg.ly }}" fill="none" stroke="{{ seg.color }}" stroke-width="0.35"/>
+        <circle cx="{{ seg.px }}" cy="{{ seg.py }}" r="1" fill="{{ seg.color }}"/>
+        <text text-anchor="{{ seg.anchor }}" class="donut-label">
+            <tspan x="{{ seg.lx }}" y="{{ seg.ly }}" class="donut-pct" fill="{{ seg.color }}">{{ seg.share }}%</tspan>
+            <tspan x="{{ seg.lx }}" dy="3.1" class="donut-name">for {{ seg.label }}</tspan>
+        </text>
         {% endif %}
         {% endfor %}
     </svg>

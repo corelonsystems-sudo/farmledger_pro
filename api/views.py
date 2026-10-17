@@ -16,7 +16,7 @@ from accounts.access import (
 )
 from accounts.models import FarmProfile, User
 from accounts.serializers import FarmProfileSerializer, UserSerializer
-from budgets.models import Budget
+from budgets.models import Budget, BudgetIncomePlan, BudgetItem
 from budgets.queries import get_budget_variance_report
 from crops.models import CropSeason, HarvestRecord
 from equipment.models import Equipment, EquipmentUsage, MaintenanceLog
@@ -28,15 +28,32 @@ from expenses.serializers import (
 )
 from fields.models import Field, LandParcel
 from inventory.models import InventoryAlert, InventoryItem, InventoryTransaction
-from labor.models import AttendanceRecord, PayrollRun, Task, Worker
+from labor.models import AttendanceRecord, PayrollLine, PayrollRun, Task, Worker
 
+from crops.models import Crop, Customer, ProcessingStage, Sale
+from income.models import Income
 from .serializers import (
     AttendanceRecordSerializer,
+    BudgetIncomePlanSerializer,
+    BudgetItemSerializer,
+    BudgetSerializer,
     CropSeasonSerializer,
+    CropSerializer,
+    CustomerSerializer,
     EquipmentSerializer,
+    EquipmentUsageSerializer,
     FieldSerializer,
+    HarvestRecordSerializer,
+    IncomeSerializer,
+    InventoryAlertSerializer,
     InventoryItemSerializer,
+    InventoryTransactionSerializer,
+    LandParcelSerializer,
+    MaintenanceLogSerializer,
+    PayrollLineSerializer,
     PayrollRunSerializer,
+    ProcessingStageSerializer,
+    SaleSerializer,
     TaskSerializer,
     WorkerSerializer,
 )
@@ -141,13 +158,13 @@ class CropSeasonDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIVie
 
 
 class CategoryListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = Category.objects.all()
+    queryset = Category.objects.order_by('name')
     serializer_class = CategorySerializer
     permission_classes = (IsAuthenticated,)
 
 
 class ExpenseListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = Expense.objects.all()
+    queryset = Expense.objects.order_by('-date', '-pk')
     serializer_class = ExpenseSerializer
     permission_classes = (IsAuthenticated,)
     filterset_class = ExpenseFilter
@@ -160,7 +177,7 @@ class ExpenseDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
 
 
 class InventoryItemListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = InventoryItem.objects.all()
+    queryset = InventoryItem.objects.order_by('name')
     serializer_class = InventoryItemSerializer
     permission_classes = (IsAuthenticated,)
     filterset_class = InventoryItemFilter
@@ -173,7 +190,7 @@ class InventoryItemDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPI
 
 
 class EquipmentListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = Equipment.objects.all()
+    queryset = Equipment.objects.order_by('name')
     serializer_class = EquipmentSerializer
     permission_classes = (IsAuthenticated,)
     filterset_class = EquipmentFilter
@@ -186,7 +203,7 @@ class EquipmentDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView
 
 
 class WorkerListView(FarmScopedMixin, generics.ListCreateAPIView):
-    queryset = Worker.objects.all()
+    queryset = Worker.objects.order_by('name')
     serializer_class = WorkerSerializer
     permission_classes = (IsAuthenticated,)
     filterset_class = WorkerFilter
@@ -195,6 +212,216 @@ class WorkerListView(FarmScopedMixin, generics.ListCreateAPIView):
 class WorkerDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Worker.objects.all()
     serializer_class = WorkerSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class LandParcelListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = LandParcel.objects.select_related('field').order_by('field__name', 'pk')
+    serializer_class = LandParcelSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class LandParcelDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = LandParcel.objects.all()
+    serializer_class = LandParcelSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class CropListView(FarmScopedMixin, generics.ListAPIView):
+    queryset = Crop.objects.order_by('name')
+    serializer_class = CropSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class HarvestRecordListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = HarvestRecord.objects.select_related('crop_season__crop').order_by('-harvest_date', '-pk')
+    serializer_class = HarvestRecordSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class HarvestRecordDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = HarvestRecord.objects.all()
+    serializer_class = HarvestRecordSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class ProcessingStageListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = ProcessingStage.objects.select_related('harvest').order_by('harvest_id', 'sequence')
+    serializer_class = ProcessingStageSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class ProcessingStageDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = ProcessingStage.objects.all()
+    serializer_class = ProcessingStageSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class SaleListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = Sale.objects.select_related('harvest', 'customer', 'inventory_item').order_by('-sale_date', '-pk')
+    serializer_class = SaleSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class SaleDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Sale.objects.all()
+    serializer_class = SaleSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class CustomerListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = Customer.objects.order_by('name')
+    serializer_class = CustomerSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class CustomerDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Customer.objects.all()
+    serializer_class = CustomerSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class IncomeListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = Income.objects.select_related('source', 'customer_ref').order_by('-date', '-pk')
+    serializer_class = IncomeSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class IncomeDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Income.objects.all()
+    serializer_class = IncomeSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = Budget.objects.order_by('-start_date')
+    serializer_class = BudgetSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Budget.objects.all()
+    serializer_class = BudgetSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class MaintenanceLogListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = MaintenanceLog.objects.select_related('equipment').order_by('-date', '-pk')
+    serializer_class = MaintenanceLogSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class MaintenanceLogDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = MaintenanceLog.objects.all()
+    serializer_class = MaintenanceLogSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class EquipmentUsageListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = EquipmentUsage.objects.select_related('equipment', 'field').order_by('-date', '-pk')
+    serializer_class = EquipmentUsageSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class EquipmentUsageDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = EquipmentUsage.objects.all()
+    serializer_class = EquipmentUsageSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class InventoryTransactionListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = InventoryTransaction.objects.select_related('item').order_by('-date', '-pk')
+    serializer_class = InventoryTransactionSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class InventoryTransactionDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = InventoryTransaction.objects.all()
+    serializer_class = InventoryTransactionSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class InventoryAlertListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = InventoryAlert.objects.select_related('item').order_by('-pk')
+    serializer_class = InventoryAlertSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class InventoryAlertDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = InventoryAlert.objects.all()
+    serializer_class = InventoryAlertSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class TaskListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = Task.objects.prefetch_related('workers').order_by('-pk')
+    serializer_class = TaskSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class TaskDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class AttendanceRecordListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = AttendanceRecord.objects.select_related('worker', 'task').order_by('-date', '-pk')
+    serializer_class = AttendanceRecordSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class AttendanceRecordDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = AttendanceRecord.objects.all()
+    serializer_class = AttendanceRecordSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class PayrollRunListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = PayrollRun.objects.prefetch_related('lines').order_by('-start_date', '-pk')
+    serializer_class = PayrollRunSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class PayrollRunDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = PayrollRun.objects.all()
+    serializer_class = PayrollRunSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class PayrollLineListView(FarmScopedMixin, generics.ListAPIView):
+    queryset = PayrollLine.objects.select_related('worker', 'payroll_run').order_by('payroll_run_id', 'worker__name')
+    serializer_class = PayrollLineSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class PayrollLineDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = PayrollLine.objects.all()
+    serializer_class = PayrollLineSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetItemListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = BudgetItem.objects.select_related('budget', 'category').order_by('budget_id', 'line_code')
+    serializer_class = BudgetItemSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetItemDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = BudgetItem.objects.all()
+    serializer_class = BudgetItemSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetIncomePlanListView(FarmScopedMixin, generics.ListCreateAPIView):
+    queryset = BudgetIncomePlan.objects.select_related('budget').order_by('budget_id', 'pk')
+    serializer_class = BudgetIncomePlanSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class BudgetIncomePlanDetailView(FarmScopedMixin, generics.RetrieveUpdateDestroyAPIView):
+    queryset = BudgetIncomePlan.objects.all()
+    serializer_class = BudgetIncomePlanSerializer
     permission_classes = (IsAuthenticated,)
 
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AttendanceRecord, PayrollRun, Task, Worker
+from .models import AttendanceRecord, PayrollLine, PayrollRun, Task, Worker
 
 
 class AttendanceRecordInline(admin.TabularInline):
@@ -30,8 +30,15 @@ class AttendanceRecordAdmin(admin.ModelAdmin):
     search_fields = ('worker__name', 'notes')
 
 
+class PayrollLineInline(admin.TabularInline):
+    model = PayrollLine
+    extra = 0
+    readonly_fields = ('created_at',)
+
+
 @admin.register(PayrollRun)
 class PayrollRunAdmin(admin.ModelAdmin):
     list_display = ('farm_profile', 'start_date', 'end_date', 'status', 'total_amount')
     list_filter = ('status', 'farm_profile')
     search_fields = ('farm_profile__farm_name',)
+    inlines = (PayrollLineInline,)

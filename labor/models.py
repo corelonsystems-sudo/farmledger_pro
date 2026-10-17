@@ -118,3 +118,62 @@ class PayrollRun(models.Model):
 
     def __str__(self):
         return f'Payroll {self.start_date} to {self.end_date} - {self.status}'
+
+    def generate_from_attendance(self):
+        """(Re)build per-worker lines from attendance records in the pay period
+        and update ``total_amount``. No-op for completed runs."""
+        from django.db import transaction
+        from django.db.models import DecimalField, Sum
+        from django.db.models.functions import Coalesce
+
+        if self.status == self.PayrollStatus.COMPLETED:
+            return 0
+        rows = (
+            AttendanceRecord.objects
+            .filter(worker__farm_profile=self.farm_profile,
+                    date__range=(self.start_date, self.end_date))
+            .values('worker')
+            .annotate(hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()),
+                      overtime=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()))
+        )
+        total = 0
+        with transaction.atomic():
+            self.lines.all().delete()
+            for row in rows:
+                worker = Worker.objects.get(pk=row['worker'])
+                amount = (row['hours'] * worker.hourly_rate
+                          + row['overtime'] * worker.hourly_rate * 2)
+                PayrollLine.objects.create(
+                    payroll_run=self, worker=worker,
+                    hours=row['hours'], overtime_hours=row['overtime'],
+                    amount=amount)
+                total += amount
+            self.total_amount = total
+            self.save(update_fields=['total_amount', 'updated_at'])
+        return total
+
+
+class PayrollLine(models.Model):
+    payroll_run = models.ForeignKey(
+        PayrollRun,
+        on_delete=models.CASCADE,
+        related_name='lines',
+    )
+    worker = models.ForeignKey(
+        Worker,
+        on_delete=models.PROTECT,
+        related_name='payroll_lines',
+    )
+    hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    overtime_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['payroll_run', 'worker'], name='unique_payroll_line_worker'),
+        ]
+        ordering = ['worker__name']
+
+    def __str__(self):
+        return f'{self.worker.name} - {self.amount}'

@@ -1,10 +1,12 @@
 from rest_framework import serializers
 
-from crops.models import CropSeason, HarvestRecord
+from budgets.models import Budget, BudgetIncomePlan, BudgetItem
+from crops.models import Crop, CropSeason, Customer, HarvestRecord, ProcessingStage, Sale
 from equipment.models import Equipment, EquipmentUsage, MaintenanceLog
 from fields.models import Field, LandParcel
+from income.models import Income
 from inventory.models import InventoryAlert, InventoryItem, InventoryTransaction
-from labor.models import AttendanceRecord, PayrollRun, Task, Worker
+from labor.models import AttendanceRecord, PayrollLine, PayrollRun, Task, Worker
 
 
 class FieldSerializer(serializers.ModelSerializer):
@@ -98,4 +100,63 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
 class PayrollRunSerializer(serializers.ModelSerializer):
     class Meta:
         model = PayrollRun
+        fields = '__all__'
+
+
+class CropSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Crop
+        fields = '__all__'
+
+
+class ProcessingStageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProcessingStage
+        fields = '__all__'
+
+
+class SaleSerializer(serializers.ModelSerializer):
+    total_amount = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True)
+    receivable = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = Sale
+        fields = '__all__'
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Customer
+        fields = '__all__'
+
+
+class IncomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Income
+        fields = '__all__'
+
+
+class BudgetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Budget
+        fields = '__all__'
+
+
+class BudgetItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BudgetItem
+        fields = '__all__'
+
+
+class BudgetIncomePlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BudgetIncomePlan
+        fields = '__all__'
+
+
+class PayrollLineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PayrollLine
         fields = '__all__'

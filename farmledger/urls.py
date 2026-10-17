@@ -18,11 +18,16 @@ from labor.models import Worker, Task
 
 from accounts.views import PostOnlyLogoutView, set_currency_view
 from budgets.views import budget_detail_view, budget_item_add_view, budget_code_detail_view, budget_plan_edit_view
-from crops.views import crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view, waste_detail_view, customer_detail_view
+from crops.views import crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view, waste_detail_view, customer_detail_view, sale_record_payment_view
 from income.views import income_source_detail_view
 from .views import (
     model_list, model_create, model_update, model_delete, farm_settings,
     report_workspace,
+    field_detail_view, landparcel_detail_view, equipment_detail_view,
+    inventory_item_detail_view, worker_detail_view, task_detail_view,
+    task_advance_view, payroll_run_detail_view, payroll_generate_view,
+    payroll_complete_view, animal_record_detail_view,
+    database_export, database_import,
 )
 
 
@@ -89,6 +94,18 @@ urlpatterns = [
     path('seasons/<int:pk>/', crop_season_detail_view, name='crop_season_detail'),
     path('harvests/<int:pk>/', harvest_detail_view, name='harvest_detail'),
     path('sales/<int:pk>/', sale_detail_view, name='sale_detail'),
+    path('sales/<int:pk>/payment/', sale_record_payment_view, name='sale_record_payment'),
+    path('fields/<int:pk>/', field_detail_view, name='field_detail'),
+    path('parcels/<int:pk>/', landparcel_detail_view, name='landparcel_detail'),
+    path('equipment/<int:pk>/', equipment_detail_view, name='equipment_detail'),
+    path('inventory/<int:pk>/', inventory_item_detail_view, name='inventoryitem_detail'),
+    path('workers/<int:pk>/', worker_detail_view, name='worker_detail'),
+    path('tasks/<int:pk>/', task_detail_view, name='task_detail'),
+    path('tasks/<int:pk>/advance/', task_advance_view, name='task_advance'),
+    path('payroll/<int:pk>/', payroll_run_detail_view, name='payrollrun_detail'),
+    path('payroll/<int:pk>/generate/', payroll_generate_view, name='payroll_generate'),
+    path('payroll/<int:pk>/complete/', payroll_complete_view, name='payroll_complete'),
+    path('animals/<int:pk>/', animal_record_detail_view, name='animalrecord_detail'),
     path('customers/<int:pk>/', customer_detail_view, name='customer_detail'),
     path('waste/<int:pk>/', waste_detail_view, name='waste_detail'),
     path('income-sources/<int:pk>/', income_source_detail_view, name='income_source_detail'),
@@ -99,6 +116,8 @@ urlpatterns = [
     path('integrations/', include('integrations.urls')),
     path('api/income/', include('income.urls')),
     path('dashboard/settings/', farm_settings, name='farm_settings'),
+    path('dashboard/settings/database/export/', database_export, name='database_export'),
+    path('dashboard/settings/database/import/', database_import, name='database_import'),
     # Dashboard CRUD
     path('dashboard/<str:app>/<str:model>/', model_list, name='model_list'),
     path('dashboard/<str:app>/<str:model>/new/', model_create, name='model_create'),

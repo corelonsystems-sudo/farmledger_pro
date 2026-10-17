@@ -12,6 +12,11 @@
         margin-bottom: 18px;
     }
 </style>
+{% if not can_write %}
+<style>
+    [data-modal-url] { display: none !important; }
+</style>
+{% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 {% endblock %}
 {% block content %}

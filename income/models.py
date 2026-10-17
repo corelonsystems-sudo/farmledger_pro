@@ -103,6 +103,14 @@ class Income(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateField()
     customer = models.CharField(max_length=200, blank=True, default='')
+    customer_ref = models.ForeignKey(
+        'crops.Customer',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='income_records',
+        help_text='Linked customer catalog entry (set automatically for sale income).',
+    )
     payment_method = models.CharField(
         max_length=20,
         choices=PaymentMethod.choices,
@@ -118,6 +126,10 @@ class Income(models.Model):
     offline_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def customer_display(self):
+        return self.customer_ref.name if self.customer_ref_id else self.customer
 
     def __str__(self):
         source_name = self.source.name if self.source else 'No Source'
