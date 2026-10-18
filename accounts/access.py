@@ -13,6 +13,9 @@ FARM_LOOKUPS = {
     'crops.processingstage': 'harvest__crop_season__field__farm_profile_id',
     'crops.sale': 'harvest__crop_season__field__farm_profile_id',
     'crops.customer': 'farm_profile_id',
+    'crops.invoice': 'farm_profile_id',
+    'crops.invoiceitem': 'invoice__farm_profile_id',
+    'crops.invoicepayment': 'invoice__farm_profile_id',
     'expenses.expense': 'farm_profile_id',
     'income.income': 'farm_profile_id',
     'inventory.inventoryitem': 'farm_profile_id',
@@ -50,6 +53,7 @@ FINANCIAL_MODELS = {
     'expenses.expense', 'income.income', 'budgets.budget',
     'budgets.budgetitem', 'budgets.budgetincomeplan', 'inventory.inventorytransaction',
     'integrations.bankaccount', 'integrations.banktransaction',
+    'crops.invoice', 'crops.invoicepayment',
 }
 
 

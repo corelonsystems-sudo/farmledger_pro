@@ -72,6 +72,68 @@ def budget_code_detail_view(request, pk):
     return render(request, 'budgets/budget_code_detail.html', context)
 
 
+@login_required
+def budget_subcode_detail_view(request, pk):
+    """Detail page for a Budget SubCode: schedule lines, budget items and spend."""
+    subcode = get_object_or_404(
+        BudgetSubCode.objects.select_related('category'), pk=pk)
+    lines = list(subcode.schedule_lines.all().order_by('name', 'code'))
+    items = scoped_queryset(BudgetItem, request.user).filter(
+        subcode=subcode).select_related('budget', 'category', 'crop_season', 'schedule_line')
+
+    item_data = []
+    line_stats = {line.pk: {'items': 0, 'planned': Decimal('0')} for line in lines}
+    for item in items:
+        spent = item.spent_amount
+        planned = item.planned_amount
+        if planned and planned > 0:
+            pct = min((spent / planned) * 100, 100)
+        else:
+            pct = 0
+        item_data.append({
+            'item': item,
+            'spent': spent,
+            'remaining': planned - spent,
+            'pct': round(pct, 1),
+            'over_budget': spent > planned if planned else False,
+            'fund_amount': item.fund_amount,
+        })
+        if item.schedule_line_id in line_stats:
+            line_stats[item.schedule_line_id]['items'] += 1
+            line_stats[item.schedule_line_id]['planned'] += planned or Decimal('0')
+    for line in lines:
+        line.items_used = line_stats[line.pk]['items']
+        line.planned_used = line_stats[line.pk]['planned']
+
+    total_planned = sum(i.planned_amount for i in items)
+    total_spent = sum(i.spent_amount for i in items)
+
+    from farmledger.views import _donut_segments
+    by_line = {}
+    for item in items:
+        key = item.schedule_line.name if item.schedule_line else 'Unassigned'
+        by_line[key] = by_line.get(key, Decimal('0')) + (item.planned_amount or Decimal('0'))
+    line_segments = _donut_segments(sorted(
+        [{'label': k, 'total': v} for k, v in by_line.items() if v > 0],
+        key=lambda r: r['total'], reverse=True))
+
+    header_farms = list(accessible_farms(request.user).order_by('pk')[:2])
+    context = {
+        'subcode': subcode,
+        'code': subcode.category,
+        'lines': lines,
+        'header_farm': header_farms[0] if len(header_farms) == 1 else None,
+        'can_edit_code': request.user.is_superuser,
+        'item_data': item_data,
+        'total_planned': total_planned,
+        'total_spent': total_spent,
+        'total_remaining': total_planned - total_spent,
+        'execution_pct': round(float(total_spent / total_planned * 100), 1) if total_planned else 0,
+        'line_segments': line_segments,
+    }
+    return render(request, 'budgets/budget_subcode_detail.html', context)
+
+
 class BudgetLineFormSet(BaseInlineFormSet):
     def clean(self):
         super().clean()
@@ -121,7 +183,7 @@ def budget_plan_edit_view(request, pk=None):
     form_valid = form.is_valid() if data is not None else False
     IncomeForms = inlineformset_factory(
         Budget, BudgetIncomePlan, form=BudgetIncomePlanForm, formset=BudgetLineFormSet,
-        fields=['line_code', 'funding_type', 'schedule_line', 'planned_amount', 'figure_type', 'notes'],
+        fields=['line_code', 'funding_type', 'income_source', 'planned_amount', 'figure_type', 'notes'],
         extra=1, can_delete=True, max_num=300, validate_max=True, absolute_max=600)
     ItemForms = inlineformset_factory(
         Budget, BudgetItem, form=BudgetItemForm, formset=BudgetLineFormSet,

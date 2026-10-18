@@ -8,7 +8,7 @@ from accounts.models import FarmProfile
 from budgets.models import Budget
 from crops.models import Crop, CropSeason, HarvestRecord, Sale
 from equipment.models import Equipment, MaintenanceLog
-from expenses.models import Category, Expense
+from expenses.models import Category, Expense, ScheduleLine
 from fields.models import Field, LandParcel
 from inventory.models import InventoryItem
 from labor.models import AttendanceRecord, Task, Worker
@@ -84,9 +84,10 @@ class Command(BaseCommand):
         # --- Create Categories ---
         categories = {}
         for name, schedule_f_line in PRE_SEED_CATEGORIES:
+            line = ScheduleLine.objects.filter(code=schedule_f_line).first()
             cat, created = Category.objects.get_or_create(
                 name=name,
-                defaults={'schedule_f_line_id': schedule_f_line},
+                defaults={'schedule_f_line': line} if line else {},
             )
             categories[name] = cat
         self.stdout.write(f'  Created {len(categories)} expense categories')

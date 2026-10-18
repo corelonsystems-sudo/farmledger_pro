@@ -5,8 +5,11 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from accounts.models import FarmProfile, User
-from crops.models import Crop, CropSeason, HarvestRecord, ProcessingStage, Sale
+from accounts.models import FarmMembership, FarmProfile, User
+from crops.models import (
+    Crop, CropSeason, Customer, HarvestRecord, Invoice, InvoiceItem,
+    ProcessingStage, Sale,
+)
 from fields.models import Field
 from income.models import Income
 from inventory.models import InventoryItem
@@ -890,3 +893,255 @@ class CropDetailChartTests(TestCase):
         self.assertEqual(response.context['qty_segments'], [])
         self.assertEqual(response.context['stage_flow'], [])
         self.assertContains(response, 'No dated activity for this selection')
+
+
+class InvoiceFlowTests(TestCase):
+    """Invoices: create/edit with items, payments, printable docs, sale raise."""
+
+    def setUp(self):
+        from inventory.models import InventoryItem
+        self.user = User.objects.create_user(username='inv-owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Invoice Farm')
+        self.customer = Customer.objects.create(farm_profile=self.farm, name='Kampala Traders')
+        self.item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Grain sacks', unit='kg',
+            quantity_on_hand=Decimal('500'))
+        self.sale = Sale.objects.create(
+            inventory_item=self.item, sale_date=date(2026, 2, 1),
+            quantity=Decimal('100'), unit='kg', unit_price=Decimal('2000'),
+            customer=self.customer, payment_status=Sale.PaymentStatus.PARTIAL,
+            amount_received=Decimal('100000'))
+        self.client.force_login(self.user)
+
+    def _payload(self):
+        return {
+            'farm_profile': self.farm.pk, 'customer': self.customer.pk,
+            'buyer': '', 'date': '2026-02-05', 'due_date': '2026-03-05',
+            'payment_terms': 'Net 30', 'reference': '', 'tax_percent': '0',
+            'discount': '0', 'payment_details': '',
+            'status': 'ISSUED', 'notes': 'Pay within 30 days',
+            'items-TOTAL_FORMS': '1', 'items-INITIAL_FORMS': '0',
+            'items-0-description': 'Grain sacks', 'items-0-detail': '',
+            'items-0-quantity': '100',
+            'items-0-unit': 'kg', 'items-0-unit_price': '2000',
+            'items-0-unit_cost': '900',
+        }
+
+    def test_create_invoice_with_items_and_numbering(self):
+        response = self.client.post(reverse('invoice_create'), self._payload())
+        self.assertEqual(response.status_code, 302)
+        invoice = Invoice.objects.get(customer=self.customer, sale=None)
+        # INV-00001 is the sale's automatic invoice; the manual one follows.
+        self.assertEqual(invoice.number, 'INV-00002')
+        self.assertEqual(invoice.buyer, 'Kampala Traders')
+        self.assertEqual(invoice.total, Decimal('200000'))
+        self.assertEqual(invoice.status, Invoice.Status.ISSUED)
+        self.assertRedirects(response, reverse('invoice_detail', kwargs={'pk': invoice.pk}))
+
+    def test_payment_updates_status_and_receipt_renders(self):
+        invoice = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 2, 5),
+            status=Invoice.Status.ISSUED)
+        InvoiceItem.objects.create(
+            invoice=invoice, description='Grain', quantity=Decimal('10'),
+            unit='kg', unit_price=Decimal('1000'))
+        response = self.client.post(
+            reverse('invoice_record_payment', kwargs={'pk': invoice.pk}),
+            {'amount': '4000', 'date': '2026-02-10', 'method': 'CASH',
+             'reference': 'RC1', 'notes': ''})
+        self.assertEqual(invoice.payments.count(), 1)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.Status.PARTIAL)
+        payment = invoice.payments.first()
+        # Overpayment is rejected
+        response = self.client.post(
+            reverse('invoice_record_payment', kwargs={'pk': invoice.pk}),
+            {'amount': '99999', 'date': '2026-02-11', 'method': 'CASH'})
+        self.assertEqual(invoice.payments.count(), 1)
+        # Printable receipt downloads as a PDF document
+        page = self.client.get(reverse(
+            'invoice_payment_receipt', kwargs={'pk': invoice.pk, 'payment_pk': payment.pk}))
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page['Content-Type'], 'application/pdf')
+        self.assertIn('RCP-', page['Content-Disposition'])
+        self.assertTrue(page.content.startswith(b'%PDF-'))
+
+    def test_invoice_detail_is_printable_document(self):
+        invoice = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 2, 5),
+            status=Invoice.Status.ISSUED, notes='Terms apply')
+        InvoiceItem.objects.create(
+            invoice=invoice, description='Grain', quantity=Decimal('10'),
+            unit='kg', unit_price=Decimal('1000'))
+        page = self.client.get(reverse('invoice_detail', kwargs={'pk': invoice.pk}))
+        self.assertContains(page, 'INVOICE')
+        self.assertContains(page, 'Invoice Farm')
+        self.assertContains(page, 'Kampala Traders')
+        self.assertContains(page, 'Download PDF')
+        self.assertEqual(page.context['balance'], Decimal('10000'))
+
+    def test_invoice_list_shows_rows_and_stats(self):
+        invoice = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 2, 5),
+            status=Invoice.Status.ISSUED)
+        InvoiceItem.objects.create(
+            invoice=invoice, description='Grain', quantity=Decimal('10'),
+            unit='kg', unit_price=Decimal('1000'))
+        page = self.client.get(reverse('invoice_list'))
+        self.assertContains(page, 'INV-')
+        self.assertContains(page, 'Outstanding')
+
+    def test_raise_invoice_from_sale_reuses_existing(self):
+        response = self.client.post(reverse('sale_generate_invoice', kwargs={'pk': self.sale.pk}))
+        invoice = Invoice.objects.first()
+        self.assertRedirects(response, reverse('invoice_detail', kwargs={'pk': invoice.pk}))
+        self.assertEqual(invoice.items.first().description, 'Grain sacks')
+        self.assertEqual(invoice.payments.count(), 1)  # sale collection carried over
+        self.assertEqual(invoice.status, Invoice.Status.PARTIAL)
+        # Raising again redirects to the existing invoice
+        response = self.client.post(reverse('sale_generate_invoice', kwargs={'pk': self.sale.pk}))
+        self.assertRedirects(response, reverse('invoice_detail', kwargs={'pk': invoice.pk}))
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_sale_receipt_renders(self):
+        page = self.client.get(reverse('sale_receipt', kwargs={'pk': self.sale.pk}))
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page['Content-Type'], 'application/pdf')
+        self.assertIn('sale-receipt-', page['Content-Disposition'])
+        self.assertTrue(page.content.startswith(b'%PDF-'))
+
+    def test_worker_cannot_create_invoice(self):
+        worker = User.objects.create_user(username='inv-worker', password='pw')
+        FarmMembership.objects.create(
+            farm_profile=self.farm, user=worker, role=User.Role.WORKER)
+        self.client.force_login(worker)
+        self.assertEqual(self.client.get(reverse('invoice_create')).status_code, 403)
+        self.assertEqual(self.client.get(reverse('invoice_list')).status_code, 200)
+        self.assertContains(self.client.get(reverse('invoice_list')), 'Kampala Traders')
+
+
+class SaleAutoInvoiceTests(TestCase):
+    """Every sale automatically gets an invoice that mirrors it."""
+
+    def setUp(self):
+        from inventory.models import InventoryItem
+        self.user = User.objects.create_user(username='auto-inv', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Auto Farm')
+        self.customer = Customer.objects.create(farm_profile=self.farm, name='Auto Buyer')
+        self.item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Sacks', unit='kg', quantity_on_hand=Decimal('500'))
+
+    def _make_sale(self, **kwargs):
+        defaults = dict(
+            inventory_item=self.item, sale_date=date(2026, 2, 1),
+            quantity=Decimal('50'), unit='kg', unit_price=Decimal('1000'),
+            customer=self.customer, payment_status=Sale.PaymentStatus.PAID)
+        defaults.update(kwargs)
+        return Sale.objects.create(**defaults)
+
+    def test_sale_creates_auto_invoice(self):
+        sale = self._make_sale()
+        invoice = sale.invoices.get()
+        self.assertEqual(invoice.number, 'INV-00001')
+        self.assertEqual(invoice.buyer, 'Auto Buyer')
+        self.assertEqual(invoice.status, Invoice.Status.PAID)
+        line = invoice.items.get()
+        self.assertEqual(line.description, 'Sacks')
+        self.assertEqual(line.total, Decimal('50000'))
+        self.assertEqual(invoice.payments.get().amount, Decimal('50000'))
+
+    def test_sale_update_mirrors_invoice(self):
+        sale = self._make_sale(payment_status=Sale.PaymentStatus.PARTIAL,
+                               amount_received=Decimal('20000'))
+        invoice = sale.invoices.get()
+        self.assertEqual(invoice.status, Invoice.Status.PARTIAL)
+        sale.quantity = Decimal('80')
+        sale.amount_received = Decimal('40000')
+        sale.save()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.items.get().quantity, Decimal('80'))
+        self.assertEqual(invoice.total, Decimal('80000'))
+        self.assertEqual(invoice.payments.get().amount, Decimal('40000'))
+        self.assertEqual(invoice.status, Invoice.Status.PARTIAL)
+
+    def test_partial_then_full_payment_flows_to_invoice(self):
+        sale = self._make_sale(payment_status=Sale.PaymentStatus.UNPAID)
+        invoice = sale.invoices.get()
+        self.assertEqual(invoice.status, Invoice.Status.ISSUED)
+        self.assertEqual(invoice.payments.count(), 0)
+        sale.payment_status = Sale.PaymentStatus.PAID
+        sale.save()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.Status.PAID)
+        self.assertEqual(invoice.payments.get().amount, Decimal('50000'))
+
+    def test_deleting_sale_removes_invoice(self):
+        sale = self._make_sale()
+        self.assertEqual(Invoice.objects.count(), 1)
+        sale.delete()
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_manual_invoice_survives_sale_deletion(self):
+        self._make_sale()
+        manual = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, buyer='Walk-in',
+            date=date(2026, 2, 2), status=Invoice.Status.ISSUED)
+        InvoiceItem.objects.create(
+            invoice=manual, description='Direct order', quantity=Decimal('5'),
+            unit='kg', unit_price=Decimal('900'))
+        self.assertEqual(Invoice.objects.count(), 2)
+        Sale.objects.all().delete()
+        self.assertEqual(list(Invoice.objects.all()), [manual])
+
+
+class InvoiceDocumentTests(TestCase):
+    """Invoice document layout fields (terms, reference, tax, discount) + PDF."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='doc-owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Doc Farm')
+        self.customer = Customer.objects.create(farm_profile=self.farm, name='Doc Buyer')
+        self.client.force_login(self.user)
+
+    def _invoice(self, **kwargs):
+        defaults = dict(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 2, 5),
+            status=Invoice.Status.ISSUED, payment_terms='Net 30',
+            reference='PO-0077', tax_percent=Decimal('18'), discount=Decimal('100'))
+        defaults.update(kwargs)
+        invoice = Invoice.objects.create(**defaults)
+        InvoiceItem.objects.create(
+            invoice=invoice, description='Grain', detail='Grade A, cleaned',
+            quantity=Decimal('10'), unit='kg', unit_price=Decimal('1000'),
+            unit_cost=Decimal('600'))
+        return invoice
+
+    def test_tax_discount_and_total_due(self):
+        invoice = self._invoice()
+        self.assertEqual(invoice.subtotal, Decimal('10000'))
+        self.assertEqual(invoice.tax_amount, Decimal('1800'))
+        self.assertEqual(invoice.total, Decimal('11700'))  # 10000 + 1800 tax - 100 discount
+        self.assertEqual(invoice.balance, Decimal('11700'))
+
+    def test_detail_page_shows_document_fields(self):
+        invoice = self._invoice()
+        page = self.client.get(reverse('invoice_detail', kwargs={'pk': invoice.pk}))
+        body = page.content.decode()
+        for marker in ('Billing Summary', 'Payment Progress', 'Invoice Items',
+                       'INVOICE ITEMS', 'Grade A, cleaned', 'Quantity, Price &amp; Production Cost',
+                       'Revenue vs Production Cost', 'Download PDF',
+                       'budget-toolbar', 'PAYMENTS'):
+            self.assertIn(marker, body)
+        self.assertNotIn('INVOICE DOCUMENT', body)
+        self.assertNotIn('BILLED TO', body)
+        self.assertEqual(page.context['tax_amount'], Decimal('1800'))
+        self.assertEqual(page.context['total_production_cost'], Decimal('6000'))
+        self.assertEqual(page.context['chart_rows'][0]['production_cost_pct'], 60)
+
+    def test_pdf_download(self):
+        invoice = self._invoice()
+        response = self.client.get(reverse('invoice_pdf', kwargs={'pk': invoice.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn('INV-', response['Content-Disposition'])
+        self.assertTrue(response.content.startswith(b'%PDF-'))

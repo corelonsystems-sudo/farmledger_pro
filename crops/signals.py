@@ -2,7 +2,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .models import HarvestRecord, ProcessingStage, Sale
-from .services import sync_processing_expense, sync_sale_income
+from .services import sync_processing_expense, sync_sale_income, sync_sale_invoice
 
 
 @receiver(post_save, sender=HarvestRecord)
@@ -25,6 +25,7 @@ def sync_income_from_sale(sender, instance, **kwargs):
     Income.sale, so no orphaned income is left behind.
     """
     sync_sale_income(instance)
+    sync_sale_invoice(instance)
 
 
 @receiver(post_save, sender=ProcessingStage)

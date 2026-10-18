@@ -1,0 +1,63 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Sale Receipt - FarmLedger Pro{% endblock %}
+
+{% block extra_head %}
+<style>
+    .doc-wrap { max-width:640px; margin:0 auto; }
+    .doc-actions { display:flex; justify-content:space-between; margin-bottom:16px; }
+    .doc-actions .btn-primary { background:var(--primary); color:white; border:none; }
+    .doc-actions .btn-secondary { background:#e2e8f0; color:var(--text); border:none; }
+    .receipt { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:32px; }
+    .receipt-head { text-align:center; border-bottom:2px solid #1b4332; padding-bottom:16px; margin-bottom:20px; }
+    .receipt-logo { width:56px; height:56px; border-radius:12px; background:#1b4332; color:#d8f3dc; display:grid; place-items:center; font-size:1.3rem; font-weight:800; overflow:hidden; margin:0 auto 10px; }
+    .receipt-logo img { width:100%; height:100%; object-fit:cover; }
+    .receipt-head h2 { margin:0; color:#1b4332; font-size:1.1rem; }
+    .receipt-head p { margin:2px 0 0; font-size:.72rem; color:#64748b; }
+    .receipt-title { font-size:1.3rem; letter-spacing:.14em; color:#1b4332; font-weight:800; margin-top:10px; }
+    .receipt-no { font-size:.74rem; color:#64748b; }
+    .amount-box { background:#f4f7f5; border:1px solid #d4dcd7; border-radius:8px; padding:14px; text-align:center; margin-bottom:18px; }
+    .amount-box .figure { font-size:1.5rem; font-weight:800; color:#1b4332; }
+    .amount-box .caption { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:#8a988f; margin-top:3px; }
+    .receipt-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px dashed #d4dcd7; font-size:.84rem; }
+    .receipt-row span { color:#64748b; }
+    .receipt-row strong { text-align:right; }
+    .receipt-sign { display:flex; justify-content:space-between; margin-top:34px; font-size:.72rem; color:#64748b; }
+    .receipt-sign div { width:40%; border-top:1px solid #9fb2a7; padding-top:5px; text-align:center; }
+    .receipt-foot { text-align:center; font-size:.68rem; color:#8a988f; border-top:1px dashed #d4dcd7; padding-top:14px; margin-top:18px; }
+    @media print { .sidebar,.topbar,.doc-actions { display:none!important; } .main { margin:0; padding:0; } .receipt { border:0; padding:0; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="doc-wrap">
+    <div class="doc-actions">
+        <a class="btn btn-secondary" href="{% url 'model_list' app='crops' model='sale' %}">&larr; Back to Sales</a>
+        <button class="btn btn-primary" type="button" onclick="window.print()">Print Receipt</button>
+    </div>
+    <article class="receipt">
+        <div class="receipt-head">
+            <div class="receipt-logo" aria-hidden="true">{% if farm and farm.logo %}<img src="{{ farm.logo.url }}" alt="">{% else %}{{ farm.farm_name|default:"FarmLedger"|first|upper }}{% endif %}</div>
+            <h2>{{ farm.farm_name|default:"FarmLedger Pro" }}</h2>
+            <p>{{ farm.location|default:"" }}{% if farm.location and farm.phone %} &middot;{% endif %} {{ farm.phone|default:"" }}</p>
+            <div class="receipt-title">SALE RECEIPT</div>
+            <div class="receipt-no">Receipt SLC-{{ sale.pk|stringformat:"05d" }} &middot; {{ sale.sale_date|date:"d F Y" }}</div>
+        </div>
+        <div class="amount-box">
+            <div class="figure">{{ sale.total_amount|as_currency:currency }}</div>
+            <div class="caption">Sale total</div>
+        </div>
+        <div class="receipt-row"><span>Sold to</span><strong>{{ sale.buyer|default:"-" }}</strong></div>
+        <div class="receipt-row"><span>Item</span><strong>{{ sale_desc|default:"Produce" }}</strong></div>
+        <div class="receipt-row"><span>Quantity</span><strong>{{ sale.quantity|floatformat:"-2" }} {{ sale.unit }}</strong></div>
+        <div class="receipt-row"><span>Unit price</span><strong>{{ sale.unit_price|as_currency:currency }}</strong></div>
+        <div class="receipt-row"><span>Payment method</span><strong>{{ sale.get_payment_method_display }}</strong></div>
+        <div class="receipt-row"><span>Amount received</span><strong>{{ sale.amount_received|as_currency:currency }}</strong></div>
+        <div class="receipt-row"><span>Balance outstanding</span><strong>{{ balance|as_currency:currency }}</strong></div>
+        <div class="receipt-sign">
+            <div>Served by</div>
+            <div>Customer signature</div>
+        </div>
+        <div class="receipt-foot">Thank you for your business.</div>
+    </article>
+</div>
+{% endblock %}

@@ -16,9 +16,6 @@ class ScheduleLineAdmin(admin.ModelAdmin):
     list_filter = ('subcode__category',)
     search_fields = ('code', 'name', 'description')
 
-    def get_readonly_fields(self, request, obj=None):
-        return ('code',) if obj else ()
-
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):

@@ -1,0 +1,84 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ action }} Invoice - FarmLedger Pro{% endblock %}
+{% block nav_invoices %}active{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'invoice_list' %}">Invoices</a> &rsaquo; {{ action }} Invoice{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .inv-form-card { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; max-width:900px; }
+    .inv-form-card h2 { margin:0 0 16px; font-size:1rem; color:#1b4332; }
+    .form-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px 16px; margin-bottom:18px; }
+    .form-grid .wide { grid-column:1/-1; }
+    .form-grid label { display:block; font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:4px; }
+    .form-grid input, .form-grid select, .form-grid textarea { width:100%; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font:inherit; font-size:.82rem; }
+    .item-rows { display:flex; flex-direction:column; gap:10px; }
+    .item-row { display:grid; grid-template-columns:minmax(150px,1fr) minmax(130px,1fr) 76px 62px 100px 100px 32px; gap:8px; align-items:end; min-width:760px; }
+    .item-row label { display:block; font-size:.62rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:3px; }
+    .item-row input, .item-row select { width:100%; border:1px solid var(--border); border-radius:7px; padding:7px 9px; font:inherit; font-size:.8rem; }
+    .item-row .del { display:flex; align-items:center; justify-content:center; padding-bottom:6px; }
+    .item-row .del input { width:16px; height:16px; accent-color:#b91c1c; }
+    .item-total-hint { grid-column:1/-1; font-size:.72rem; color:#64748b; }
+    .form-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; }
+    .errorlist { color:#b91c1c; font-size:.72rem; margin:3px 0 0; padding-left:16px; }
+    .add-item { margin-top:10px; }
+    @media(max-width:700px) { .form-grid { grid-template-columns:1fr; } .item-rows { overflow-x:auto; padding-bottom:6px; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="inv-form-card">
+    <h2>{{ action }} Invoice{% if invoice.number %} {{ invoice.number }}{% endif %}</h2>
+    <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<ul class="errorlist">{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+        <div class="form-grid">
+            {% for field in form.visible_fields %}
+            <div class="{% if field.name == 'notes' or field.name == 'payment_details' %}wide{% endif %}">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}{{ field.errors }}
+            </div>
+            {% endfor %}
+        </div>
+
+        <h2>Line Items</h2>
+        {{ items.management_form }}
+        {% if items.non_form_errors %}<ul class="errorlist">{% for e in items.non_form_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+        <div class="item-rows" id="item-rows">
+            {% for item_form in items %}
+            <div class="item-row">
+                {% for field in item_form.visible_fields %}
+                {% if field.name == 'DELETE' %}
+                <div class="del"><label for="{{ field.id_for_label }}">Del</label>{{ field }}</div>
+                {% else %}
+                <div>
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}{{ field.errors }}
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        <button type="button" class="btn btn-secondary add-item" id="add-item">+ Add line item</button>
+
+        <div class="form-actions">
+            <a class="btn btn-secondary" href="{% if invoice.pk %}{% url 'invoice_detail' invoice.pk %}{% else %}{% url 'invoice_list' %}{% endif %}">Cancel</a>
+            <button class="btn btn-primary" type="submit">Save Invoice</button>
+        </div>
+    </form>
+</div>
+
+<template id="item-empty">{% include "invoices/_item_row.html" with item_form=items.empty_form %}</template>
+<script>
+(function () {
+    var rows = document.getElementById('item-rows');
+    var counter = document.querySelector('input[id$="-TOTAL_FORMS"]');
+    document.getElementById('add-item').addEventListener('click', function () {
+        var tpl = document.getElementById('item-empty').innerHTML.replace(/__prefix__/g, counter.value);
+        rows.insertAdjacentHTML('beforeend', tpl);
+        counter.value = Number(counter.value) + 1;
+    });
+})();
+</script>
+{% endblock %}

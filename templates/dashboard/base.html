@@ -375,6 +375,7 @@
                         <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                     </summary>
                     <ul>
+                        <li><a href="{% url 'invoice_list' %}" class="{% block nav_invoices %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg> Invoices</a></li>
                         <li><a href="{% url 'model_list' app='expenses' model='expense' %}" class="{% block nav_expenses %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> Expenses</a></li>
                         <li><a href="{% url 'model_list' app='income' model='income' %}" class="{% block nav_income %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> Income</a></li>
                         <li><a href="{% url 'model_list' app='income' model='incomesource' %}" class="{% block nav_income_sources %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l10 5-10 5-10-5 10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg> Income Sources</a></li>

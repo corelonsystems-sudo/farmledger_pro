@@ -203,6 +203,15 @@
                                 Pay
                             </a>
                             {% endif %}
+                            {% if not is_waste %}
+                            <form method="post" action="{% url 'sale_generate_invoice' pk=sale.pk %}" style="display:inline;">{% csrf_token %}
+                                <button type="submit" class="action-btn" style="border:1px solid #d4dcd7; cursor:pointer;">Invoice</button>
+                            </form>
+                            {% endif %}
+                            <a class="action-btn" href="{% url 'sale_receipt' pk=sale.pk %}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+                                Receipt
+                            </a>
                             {% if is_waste %}
                             <a class="action-btn" data-modal-url="{{ sale.waste_edit_url }}" data-modal-title="Edit Stock" href="javascript:void(0)">
                             {% else %}

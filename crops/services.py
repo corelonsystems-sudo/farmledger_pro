@@ -4,6 +4,8 @@ Keeps the Sale -> Income bookkeeping synchronized so financial reports and
 the ledger never drift from recorded sales.
 """
 
+from decimal import Decimal
+
 from django.db import transaction
 
 PAYMENT_METHOD_MAP = {
@@ -130,3 +132,93 @@ def sync_processing_expense(stage):
             for attr, value in synced.items():
                 setattr(expense, attr, value)
             expense.save(update_fields=[*synced.keys(), 'updated_at'])
+
+
+def _sale_description(sale):
+    """Human-readable line description for a sale's invoice/receipt."""
+    if sale.processing_stage and sale.harvest:
+        return f'{sale.harvest.crop_season.crop.name} - {sale.processing_stage.name}'
+    if sale.harvest:
+        return sale.harvest.crop_season.crop.name
+    if sale.inventory_item_id:
+        return sale.inventory_item.name
+    return 'Produce sale'
+
+
+def sync_sale_invoice(sale):
+    """Keep exactly one auto-generated Invoice per sale.
+
+    The invoice mirrors the sale as a single line item, carries the sale's
+    collected amount as one payment, and is removed with the sale (CASCADE
+    on Invoice.sale).
+    """
+    from .models import Invoice, InvoiceItem, InvoicePayment
+
+    farm_profile = _sale_farm_profile(sale)
+    if farm_profile is None:
+        return
+
+    invoice = Invoice.objects.filter(sale=sale).first()
+    if invoice is None:
+        invoice = Invoice(
+            farm_profile=farm_profile, customer=sale.customer, buyer=sale.buyer,
+            sale=sale, date=sale.sale_date, status=Invoice.Status.ISSUED,
+            notes=f'Auto-generated from sale #{sale.pk}.')
+        invoice.save()
+    else:
+        changed = []
+        if invoice.farm_profile_id != farm_profile.pk:
+            invoice.farm_profile = farm_profile
+            changed.append('farm_profile')
+        if invoice.customer_id != sale.customer_id:
+            invoice.customer = sale.customer
+            changed.append('customer')
+        if invoice.buyer != sale.buyer:
+            invoice.buyer = sale.buyer
+            changed.append('buyer')
+        if invoice.date != sale.sale_date:
+            invoice.date = sale.sale_date
+            changed.append('date')
+        if changed:
+            invoice.save(update_fields=[*changed, 'updated_at'])
+
+    description = _sale_description(sale)
+    unit_cost = Decimal('0')
+    if sale.inventory_item_id:
+        unit_cost = sale.inventory_item.cost_per_unit or Decimal('0')
+    elif (sale.processing_stage_id and sale.processing_stage.output_quantity
+          and sale.processing_stage.output_quantity > 0):
+        unit_cost = (sale.processing_stage.cost or Decimal('0')) / sale.processing_stage.output_quantity
+    item = invoice.items.first()
+    if item is None:
+        InvoiceItem.objects.create(
+            invoice=invoice, description=description,
+            quantity=sale.quantity, unit=sale.unit, unit_price=sale.unit_price,
+            unit_cost=unit_cost)
+    elif (item.description != description or item.quantity != sale.quantity
+            or item.unit != sale.unit or item.unit_price != sale.unit_price
+            or item.unit_cost != unit_cost):
+        item.description = description
+        item.quantity = sale.quantity
+        item.unit = sale.unit
+        item.unit_price = sale.unit_price
+        item.unit_cost = unit_cost
+        item.save()
+
+    reference = f'Sale #{sale.pk} collection'
+    received = sale.amount_received or Decimal('0')
+    payment = invoice.payments.filter(reference=reference).first()
+    if received > 0:
+        method = {'CASH': 'CASH', 'BANK': 'BANK', 'MOBILE': 'MOBILE'}.get(
+            sale.payment_method, 'OTHER')
+        if payment is None:
+            InvoicePayment.objects.create(
+                invoice=invoice, amount=received, date=sale.sale_date,
+                method=method, reference=reference)
+        elif payment.amount != received:
+            payment.amount = received
+            payment.save()
+    elif payment is not None:
+        payment.delete()
+
+    invoice.refresh_status()

@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from .models import Crop, CropSeason, Customer, HarvestRecord, ProcessingStage, Sale
+from .models import (Crop, CropSeason, Customer, HarvestRecord, Invoice,
+                     InvoiceItem, InvoicePayment, ProcessingStage, Sale)
 
 
 class CropSeasonInline(admin.TabularInline):
@@ -66,3 +67,27 @@ class SaleAdmin(admin.ModelAdmin):
     list_display = ('harvest', 'sale_date', 'quantity', 'unit', 'unit_price', 'buyer', 'payment_method', 'payment_status')
     list_filter = ('sale_date', 'payment_method', 'payment_status', 'harvest__crop_season__crop')
     search_fields = ('buyer', 'customer__name', 'harvest__crop_season__crop__name')
+
+
+class InvoiceItemInline(admin.TabularInline):
+    model = InvoiceItem
+    extra = 1
+
+
+class InvoicePaymentInline(admin.TabularInline):
+    model = InvoicePayment
+    extra = 0
+
+
+@admin.register(Invoice)
+class InvoiceAdmin(admin.ModelAdmin):
+    list_display = ('number', 'buyer', 'date', 'due_date', 'status', 'total')
+    list_filter = ('status', 'farm_profile')
+    search_fields = ('number', 'buyer', 'notes')
+    inlines = [InvoiceItemInline, InvoicePaymentInline]
+
+
+@admin.register(InvoicePayment)
+class InvoicePaymentAdmin(admin.ModelAdmin):
+    list_display = ('invoice', 'amount', 'date', 'method', 'reference')
+    list_filter = ('method',)

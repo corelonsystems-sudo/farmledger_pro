@@ -36,6 +36,17 @@ class IncomeSource(models.Model):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        if not self.code:
+            from django.utils.text import slugify
+            base = slugify(self.name).upper()[:15] or 'INC'
+            code, index = base, 1
+            while IncomeSource.objects.exclude(pk=self.pk).filter(code=code).exists():
+                code = f'{base}-{index}'
+                index += 1
+            self.code = code
+        super().save(*args, **kwargs)
+
 
 class Income(models.Model):
     class PaymentMethod(models.TextChoices):

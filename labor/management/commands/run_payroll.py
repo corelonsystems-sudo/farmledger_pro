@@ -9,7 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 
-from expenses.models import Category, Expense
+from expenses.models import Category, Expense, ScheduleLine
 from labor.models import AttendanceRecord, PayrollRun, Worker
 
 
@@ -64,9 +64,10 @@ class Command(BaseCommand):
             workers = Worker.objects.filter(farm_profile=farm, is_active=True)
             grand_total = Decimal('0')
 
+            labor_line = ScheduleLine.objects.filter(code='part1_labor_hired').first()
             labor_category, _ = Category.objects.get_or_create(
                 name='Labor',
-                defaults={'schedule_f_line_id': 'part1_labor_hired'},
+                defaults={'schedule_f_line': labor_line} if labor_line else {},
             )
 
             with transaction.atomic():

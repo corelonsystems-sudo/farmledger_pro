@@ -31,11 +31,11 @@ class ScheduleLineTests(TestCase):
         form_url = reverse('model_create', kwargs={'app': 'expenses', 'model': 'category'})
         self.assertContains(self.client.get(form_url), 'Irrigation infrastructure')
         response = self.client.post(form_url, {
-            'code': 'IRR', 'name': 'Irrigation', 'schedule_f_line': line.code, 'description': '',
+            'code': 'IRR', 'name': 'Irrigation', 'schedule_f_line': line.pk, 'description': '',
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertTrue(response.json()['ok'])
         category = Category.objects.get(code='IRR')
-        self.assertEqual(category.schedule_f_line_id, 'irrigation')
+        self.assertEqual(category.schedule_f_line_id, line.pk)
         self.assertEqual(category.get_schedule_f_line_display(), line.name)
         self.assertContains(self.client.get(self.list_url), 'Budget Schedule Lines')
         self.assertContains(self.client.get(self.list_url, {'q': 'irrigation'}), 'Irrigation infrastructure')
@@ -45,19 +45,21 @@ class ScheduleLineTests(TestCase):
         self.assertEqual(filtered.context['page_obj'].paginator.count, 1)
         self.assertContains(self.client.get(self.list_url), self.list_url)
 
-    def test_edit_name_updates_display_and_used_lines_cannot_be_deleted(self):
+    def test_edit_code_updates_line_and_linked_codes(self):
         line = self.model.objects.get(code='part1_other')
         category = Category.objects.create(name='Test code', code='TEST', schedule_f_line=line)
         edit_url = reverse('model_update', kwargs={
             'app': 'expenses', 'model': 'scheduleline', 'pk': line.pk,
         })
         response = self.client.post(edit_url, {
-            'code': 'tampered', 'name': 'Other costs', 'description': '',
+            'code': 'part1_renamed', 'name': 'Other costs', 'description': '',
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertTrue(response.json()['ok'])
         line.refresh_from_db()
-        self.assertEqual(line.code, 'part1_other')
+        self.assertEqual(line.code, 'part1_renamed')
+        # The linked budget code still points at the same schedule line.
         category.refresh_from_db()
+        self.assertEqual(category.schedule_f_line, line)
         self.assertEqual(category.get_schedule_f_line_display(), 'Other costs')
         delete_url = reverse('model_delete', kwargs={
             'app': 'expenses', 'model': 'scheduleline', 'pk': line.pk,

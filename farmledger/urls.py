@@ -17,8 +17,14 @@ from inventory.models import InventoryItem
 from labor.models import Worker, Task
 
 from accounts.views import PostOnlyLogoutView, set_currency_view
-from budgets.views import budget_detail_view, budget_item_add_view, budget_code_detail_view, budget_plan_edit_view
-from crops.views import crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view, waste_detail_view, customer_detail_view, sale_record_payment_view
+from budgets.views import budget_detail_view, budget_item_add_view, budget_code_detail_view, budget_subcode_detail_view, budget_plan_edit_view
+from crops.views import (
+    crop_detail_view, harvest_detail_view, crop_season_detail_view, sale_detail_view,
+    waste_detail_view, customer_detail_view, sale_record_payment_view,
+    invoice_list_view, invoice_form_view, invoice_detail_view, invoice_pdf_view,
+    invoice_record_payment_view, invoice_delete_view, invoice_payment_receipt_view,
+    sale_receipt_view, sale_generate_invoice_view,
+)
 from income.views import income_source_detail_view
 from .views import (
     model_list, model_create, model_update, model_delete, farm_settings,
@@ -90,11 +96,22 @@ urlpatterns = [
     path('budgets/<int:pk>/', budget_detail_view, name='budget_detail'),
     path('budgets/<int:budget_pk>/items/add/', budget_item_add_view, name='budget_item_add'),
     path('codes/<int:pk>/', budget_code_detail_view, name='budget_code_detail'),
+    path('subcodes/<int:pk>/', budget_subcode_detail_view, name='budget_subcode_detail'),
     path('crops/<int:pk>/', crop_detail_view, name='crop_detail'),
     path('seasons/<int:pk>/', crop_season_detail_view, name='crop_season_detail'),
     path('harvests/<int:pk>/', harvest_detail_view, name='harvest_detail'),
     path('sales/<int:pk>/', sale_detail_view, name='sale_detail'),
     path('sales/<int:pk>/payment/', sale_record_payment_view, name='sale_record_payment'),
+    path('sales/<int:pk>/receipt/', sale_receipt_view, name='sale_receipt'),
+    path('sales/<int:pk>/invoice/', sale_generate_invoice_view, name='sale_generate_invoice'),
+    path('invoices/', invoice_list_view, name='invoice_list'),
+    path('invoices/new/', invoice_form_view, name='invoice_create'),
+    path('invoices/<int:pk>/', invoice_detail_view, name='invoice_detail'),
+    path('invoices/<int:pk>/edit/', invoice_form_view, name='invoice_edit'),
+    path('invoices/<int:pk>/payment/', invoice_record_payment_view, name='invoice_record_payment'),
+    path('invoices/<int:pk>/delete/', invoice_delete_view, name='invoice_delete'),
+    path('invoices/<int:pk>/pdf/', invoice_pdf_view, name='invoice_pdf'),
+    path('invoices/<int:pk>/receipts/<int:payment_pk>/', invoice_payment_receipt_view, name='invoice_payment_receipt'),
     path('fields/<int:pk>/', field_detail_view, name='field_detail'),
     path('parcels/<int:pk>/', landparcel_detail_view, name='landparcel_detail'),
     path('equipment/<int:pk>/', equipment_detail_view, name='equipment_detail'),

@@ -481,8 +481,6 @@ class ScheduleLineForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['subcode'].empty_label = 'Not linked'
         self.fields['subcode'].required = False
-        if self.instance.pk:
-            self.fields['code'].disabled = True
 
     class Meta:
         model = ScheduleLine
@@ -494,7 +492,7 @@ class ScheduleLineForm(forms.ModelForm):
         }
         labels = {'subcode': 'Linked Subcode'}
         help_texts = {
-            'code': 'Unique identifier; cannot be changed after creation.',
+            'code': 'Unique identifier. Editing it is safe - linked budget codes keep their schedule line.',
             'subcode': 'Expenditure lines under this subcode can pick it. Leave blank for income sources and general lines.',
         }
 
@@ -784,17 +782,17 @@ class BudgetItemForm(BudgetLineForm):
 class BudgetIncomePlanForm(BudgetLineForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['schedule_line'].required = True
-        self.fields['schedule_line'].empty_label = 'Select schedule line'
+        self.fields['income_source'].required = True
+        self.fields['income_source'].empty_label = 'Select income source'
 
     class Meta:
         model = BudgetIncomePlan
-        fields = ['budget', 'line_code', 'funding_type', 'schedule_line', 'planned_amount', 'figure_type', 'notes']
+        fields = ['budget', 'line_code', 'funding_type', 'income_source', 'planned_amount', 'figure_type', 'notes']
         widgets = {
             'line_code': forms.TextInput(attrs={'placeholder': 'INC-01'}),
             'notes': forms.Textarea(attrs={'rows': 2, 'placeholder': 'Basis / notes'}),
         }
-        labels = {'funding_type': 'Source type', 'schedule_line': 'Income line item', 'figure_type': 'Figure basis'}
+        labels = {'funding_type': 'Source type', 'income_source': 'Income source', 'figure_type': 'Figure basis'}
 
 
 # -- Integrations --

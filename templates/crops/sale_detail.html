@@ -30,6 +30,10 @@
 </head>
 <body>
     <h2>{% if sale.is_waste %}{{ waste_name }} Waste Sale Receipt{% else %}Sales Receipt{% endif %}</h2>
+    <div style="text-align:right; margin-bottom:10px;">
+        <button type="button" onclick="window.print()" style="background:var(--primary); color:white; border:none; border-radius:7px; padding:8px 16px; font-weight:600; cursor:pointer;">Print</button>
+        <a href="{% url 'sale_receipt' sale.pk %}" style="display:inline-block; margin-left:8px; color:var(--primary); font-size:0.78rem;">Open full-page receipt</a>
+    </div>
     <div class="invoice-header">
         <div>
             <h3>Bill To</h3>

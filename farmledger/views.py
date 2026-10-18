@@ -40,6 +40,7 @@ DETAIL_URL_NAMES = {
     ('crops', 'customer'): 'customer_detail',
     ('budgets', 'budget'): 'budget_detail',
     ('expenses', 'category'): 'budget_code_detail',
+    ('expenses', 'budgetsubcode'): 'budget_subcode_detail',
     ('income', 'incomesource'): 'income_source_detail',
     ('fields', 'field'): 'field_detail',
     ('fields', 'landparcel'): 'landparcel_detail',
@@ -1261,7 +1262,7 @@ def _budget_code_list(request, app, model):
     if q:
         queryset = queryset.filter(Q(name__icontains=q) | Q(code__icontains=q))
     if schedule_f:
-        queryset = queryset.filter(schedule_f_line=schedule_f)
+        queryset = queryset.filter(schedule_f_line__code=schedule_f)
 
     stats = {
         'total_count': queryset.count(),
@@ -2673,7 +2674,7 @@ def _budget_subcode_list(request, app, model):
 def _income_plan_list(request, app, model):
     from budgets.models import Budget, BudgetIncomePlan
     qs = scoped_queryset(BudgetIncomePlan, request.user,
-                         BudgetIncomePlan.objects.select_related('budget', 'schedule_line'))
+                         BudgetIncomePlan.objects.select_related('budget'))
     columns = [
         {'key': 'budget', 'label': 'Budget'},
         {'key': 'code', 'label': 'Code'},
@@ -2686,7 +2687,7 @@ def _income_plan_list(request, app, model):
         return {
             'budget': p.budget.name,
             'code': p.line_code,
-            'name': _main(p.name, p.schedule_line.name if p.schedule_line_id else ''),
+            'name': _main(p.name, ''),
             'type': _pill(p.get_funding_type_display(),
                           {'CAPITAL': 'blue', 'LOAN': 'amber'}.get(p.funding_type, 'green')),
             'amount': _money(p.planned_amount),

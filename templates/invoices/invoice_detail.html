@@ -1,0 +1,375 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ invoice.number }} - FarmLedger Pro{% endblock %}
+{% block nav_invoices %}active{% endblock %}
+{% block breadcrumbs %}<a href="{% url 'invoice_list' %}">Invoices</a> &rsaquo; {{ invoice.number }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; font-size:1.8rem; font-weight:700; }
+    .budget-avatar img { width:100%; height:100%; object-fit:contain; padding:6px; border-radius:14px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .budget-header-subtitle a { color:#d8f3dc; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; background:#fff0c2; color:#795414; }
+    .budget-header-status.ISSUED { background:#dbeafe; color:#1e40af; }
+    .budget-header-status.PARTIAL { background:#fff0c2; color:#795414; }
+    .budget-header-status.PAID { background:#d5f4df; color:#14532d; }
+    .budget-header-status.DRAFT { background:#e2e8f0; color:#475569; }
+    .budget-header-status.CANCELLED { background:#fee2e2; color:#b91c1c; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:420px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden] { display:none!important; }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
+    .balance-negative { color:#b91c1c; }
+    .item-name { font-weight: 600; }
+
+    /* ---- Invoice items table ---- */
+    .inv-items { width:100%; border-collapse:collapse; margin:0; }
+    .inv-items th { text-align:left; font-size:.66rem; letter-spacing:.08em; color:#64748b; border-bottom:1px solid #d4dcd7; padding:10px 12px; text-transform:uppercase; background:#f8fafc; }
+    .inv-items th.num, .inv-items td.num { text-align:right; }
+    .inv-items td { padding:12px; border-bottom:1px solid #e5e7eb; vertical-align:top; font-size:.82rem; }
+    .inv-items .desc { font-weight:700; color:#1b4332; }
+    .inv-items .sub { font-size:.74rem; color:#6b7280; margin-top:2px; }
+    .inv-items .amount { font-variant-numeric:tabular-nums; }
+    .inv-items tfoot td { padding:8px 12px; border-bottom:1px solid #e5e7eb; color:#64748b; }
+    .inv-items tfoot .total-row td { border-top:2px solid #1b4332; font-weight:800; color:#1b4332; font-size:.9rem; }
+
+    /* ---- Payments tab ---- */
+    .pay-table { width:100%; border-collapse:collapse; }
+    .pay-table th { text-align:left; color:var(--text-muted); font-size:.68rem; font-weight:700; padding:9px 12px; border-bottom:1px solid var(--border); text-transform:uppercase; letter-spacing:.04em; background:#f8fafc; white-space:nowrap; }
+    .pay-table td { padding:10px 12px; border-bottom:1px solid var(--border); font-size:.82rem; }
+    .pay-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .receipt-link { color:#1b4332; font-weight:600; text-decoration:underline; font-size:.76rem; }
+    .inv-overview-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; }
+    .inv-overview-card { background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .inv-overview-card h3 { margin:0 0 14px; color:#1b4332; font-size:.9rem; }
+    .inv-overview-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px solid #e3ebe6; font-size:.8rem; }
+    .inv-overview-row:last-child { border-bottom:0; }
+    .inv-overview-row span { color:#64748b; }
+    .inv-overview-row strong { text-align:right; color:#1f2937; }
+    .inv-progress-track { height:12px; overflow:hidden; border-radius:999px; background:#e3ebe6; margin:12px 0 8px; }
+    .inv-progress-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,#2d6a4f,#52b788); }
+    .inv-progress-caption { display:flex; justify-content:space-between; color:#64748b; font-size:.72rem; }
+    .inv-overview-items { margin-top:16px; }
+    .inv-overview-items .table-card-head { border-bottom:1px solid #e3ebe6; }
+    .inv-overview-items table { width:100%; border-collapse:collapse; }
+    .inv-overview-items th { padding:9px 12px; text-align:left; color:#64748b; font-size:.66rem; text-transform:uppercase; border-bottom:1px solid #d4dcd7; }
+    .inv-overview-items td { padding:10px 12px; border-bottom:1px solid #e8eeea; font-size:.8rem; }
+    .inv-overview-items .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .inv-chart-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+    .inv-chart-card { min-width:0; background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .inv-chart-card h3 { margin:0 0 4px; color:#1b4332; font-size:.9rem; }
+    .inv-chart-sub { margin:0 0 14px; color:#64748b; font-size:.72rem; }
+    .metric-item { padding:10px 0; border-top:1px solid #e3ebe6; }
+    .metric-item:first-of-type { border-top:0; }
+    .metric-item-title { display:flex; justify-content:space-between; gap:12px; margin-bottom:7px; font-size:.76rem; }
+    .metric-item-title strong { color:#1b4332; }
+    .metric-row { display:grid; grid-template-columns:84px minmax(30px,1fr) auto; gap:8px; align-items:center; margin:5px 0; font-size:.67rem; }
+    .metric-row > span:first-child { color:#64748b; }
+    .metric-track { height:8px; background:#e3ebe6; border-radius:999px; overflow:hidden; }
+    .metric-fill { height:100%; border-radius:inherit; background:#2d6a4f; }
+    .metric-fill.price { background:#e9a226; }
+    .metric-fill.cost { background:#c66a4a; }
+    .metric-value { color:#374151; font-variant-numeric:tabular-nums; text-align:right; }
+    .cost-legend { display:flex; gap:15px; flex-wrap:wrap; font-size:.68rem; color:#64748b; margin-bottom:12px; }
+    .cost-legend span { display:inline-flex; align-items:center; gap:6px; }
+    .legend-swatch { width:9px; height:9px; border-radius:2px; display:inline-block; }
+    .legend-swatch.revenue { background:#2d6a4f; }
+    .legend-swatch.cost { background:#e9a226; }
+    .money-chart-row { padding:10px 0; border-top:1px solid #e3ebe6; }
+    .money-chart-name { display:flex; justify-content:space-between; gap:10px; margin-bottom:6px; font-size:.74rem; }
+    .money-chart-name strong { color:#1b4332; }
+    .money-bar-row { display:grid; grid-template-columns:66px minmax(30px,1fr) 76px; align-items:center; gap:7px; margin:4px 0; font-size:.66rem; color:#64748b; }
+    .money-bar-track { height:9px; background:#e3ebe6; border-radius:999px; overflow:hidden; }
+    .money-bar-fill { height:100%; border-radius:inherit; background:#2d6a4f; }
+    .money-bar-fill.cost { background:#e9a226; }
+    .money-bar-value { text-align:right; color:#374151; font-variant-numeric:tabular-nums; }
+    @media(max-width:720px) { .inv-overview-grid { grid-template-columns:1fr; } .inv-body { padding:22px 18px; } }
+    @media(max-width:900px) { .inv-chart-grid { grid-template-columns:1fr; } }
+    @media print {
+        .sidebar,.topbar,.budget-toolbar .actions,.pdf-actions,.no-print { display:none!important; }
+        .main { margin:0; padding:0; }
+        .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; }
+        .budget-toolbar h1,.budget-eyebrow,.budget-header-subtitle,.budget-header-tag { color:#1b4332; }
+        .budget-header-tag,.budget-header-status { background:white; border-color:#ccd5d0; }
+        .budget-paper { border:0; padding:0; }
+        .budget-tabs { display:none!important; }
+        .budget-tab-panel[hidden] { display:block!important; }
+        #inv-overview,#inv-payments { display:none!important; }
+        #inv-items-panel { display:block!important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="invoice-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true">{% if invoice.farm_profile.logo %}<img src="{{ invoice.farm_profile.logo.url }}" alt="">{% else %}{{ invoice.farm_profile.farm_name|first|upper }}{% endif %}</div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Invoice</p>
+            <h1 id="invoice-page-title">{{ invoice.number }}</h1>
+            <p class="budget-header-subtitle">Bill to: {{ invoice.buyer|default:"-" }} &middot; {{ invoice.farm_profile.farm_name }}</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {{ invoice.status }}">{{ invoice.get_status_display }}</span>
+                <span class="budget-header-tag">{{ invoice.date|date:"d M Y" }}</span>
+                <span class="budget-header-tag">Due {{ invoice.due_date|date:"d M Y"|default:"on receipt" }}</span>
+                <span class="budget-header-tag">{{ items|length }} item{{ items|length|pluralize }}</span>
+                <span class="budget-header-tag">{{ currency.code }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{% url 'invoice_list' %}">&larr; Back to Invoices</a>
+        {% if can_write %}
+        <a class="btn btn-secondary" href="{{ edit_url }}">Edit</a>
+        {% if balance > 0 and invoice.status != 'CANCELLED' %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">Record Payment</a>
+        {% endif %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ delete_url }}" data-modal-title="Delete Invoice">Delete</a>
+        {% endif %}
+        <a class="btn btn-primary" href="{{ pdf_url }}">Download PDF</a>
+        <a class="btn btn-secondary" href="{{ pdf_url }}">Print Invoice</a>
+    </div>
+</header>
+
+<div class="kpi-grid">
+    <div class="kpi-card"><div><div class="kpi-label">Subtotal</div><div class="kpi-value">{{ subtotal|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Total Due</div><div class="kpi-value">{{ total|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Amount Paid</div><div class="kpi-value">{{ amount_paid|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Balance Due</div><div class="kpi-value {% if balance > 0 %}balance-negative{% endif %}">{{ balance|as_currency:currency }}</div></div></div>
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Invoice sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-inv-overview" aria-selected="true" aria-controls="inv-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-inv-items" aria-selected="false" aria-controls="inv-items-panel" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>INVOICE ITEMS</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-inv-payments" aria-selected="false" aria-controls="inv-payments" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>PAYMENTS</button>
+</nav>
+
+{# -- Operational overview, not the printed invoice document -- #}
+<section class="budget-tab-panel" id="inv-overview" role="tabpanel" aria-labelledby="tab-inv-overview" tabindex="0">
+    <div class="inv-overview-grid">
+        <article class="inv-overview-card">
+            <h3>Billing Summary</h3>
+            <div class="inv-overview-row"><span>Customer</span><strong>{{ invoice.buyer|default:"-" }}</strong></div>
+            <div class="inv-overview-row"><span>Invoice date</span><strong>{{ invoice.date|date:"d M Y" }}</strong></div>
+            <div class="inv-overview-row"><span>Due date</span><strong>{{ invoice.due_date|date:"d M Y"|default:"On receipt" }}</strong></div>
+            <div class="inv-overview-row"><span>Payment terms</span><strong>{{ invoice.payment_terms|default:"-" }}</strong></div>
+            <div class="inv-overview-row"><span>Reference</span><strong>{{ invoice.reference|default:"-" }}</strong></div>
+            <div class="inv-overview-row"><span>Invoice status</span><strong>{{ invoice.get_status_display }}</strong></div>
+            {% if invoice.notes %}
+            <div class="inv-overview-row"><span>Notes</span><strong>{{ invoice.notes|truncatewords:24 }}</strong></div>
+            {% endif %}
+        </article>
+        <article class="inv-overview-card">
+            <h3>Payment Progress</h3>
+            <div class="inv-overview-row"><span>Total due</span><strong>{{ total|as_currency:currency }}</strong></div>
+            <div class="inv-overview-row"><span>Received</span><strong>{{ amount_paid|as_currency:currency }}</strong></div>
+            <div class="inv-overview-row"><span>Outstanding</span><strong class="{% if balance > 0 %}balance-negative{% endif %}">{{ balance|as_currency:currency }}</strong></div>
+            <div class="inv-progress-track" role="progressbar" aria-label="Invoice payment progress"
+                 aria-valuemin="0" aria-valuemax="100"
+                 aria-valuenow="{% if total %}{% widthratio amount_paid total 100 %}{% else %}0{% endif %}">
+                <div class="inv-progress-fill" data-width="{% if total %}{% widthratio amount_paid total 100 %}{% else %}0{% endif %}"></div>
+            </div>
+            <div class="inv-progress-caption">
+                <span>Paid</span>
+                <strong>{% if total %}{% widthratio amount_paid total 100 %}{% else %}0{% endif %}%</strong>
+            </div>
+            {% if can_write and balance > 0 and invoice.status != 'CANCELLED' %}
+            <a class="btn btn-primary" style="margin-top:14px;" href="javascript:void(0)"
+               data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">+ Record Payment</a>
+            {% endif %}
+        </article>
+    </div>
+
+    {% if chart_rows %}
+    <div class="inv-chart-grid">
+        <article class="inv-chart-card">
+            <h3>Quantity, Price &amp; Production Cost</h3>
+            <p class="inv-chart-sub">Per-item indicators. Each measure is scaled against its own largest line item.</p>
+            {% for row in chart_rows %}
+            <div class="metric-item">
+                <div class="metric-item-title">
+                    <strong>{{ row.description }}</strong>
+                    {% if row.detail %}<span style="color:#64748b;">{{ row.detail }}</span>{% endif %}
+                </div>
+                <div class="metric-row">
+                    <span>Quantity</span><div class="metric-track"><div class="metric-fill" data-width="{{ row.quantity_pct }}"></div></div>
+                    <span class="metric-value">{{ row.quantity|floatformat:"-2" }} {{ row.unit }}</span>
+                </div>
+                <div class="metric-row">
+                    <span>Unit price</span><div class="metric-track"><div class="metric-fill price" data-width="{{ row.price_pct }}"></div></div>
+                    <span class="metric-value">{{ row.unit_price|as_currency:currency }}/{{ row.unit }}</span>
+                </div>
+                <div class="metric-row">
+                    <span>Unit cost</span><div class="metric-track"><div class="metric-fill cost" data-width="{{ row.cost_pct }}"></div></div>
+                    <span class="metric-value">{{ row.unit_cost|as_currency:currency }}/{{ row.unit }}</span>
+                </div>
+            </div>
+            {% endfor %}
+        </article>
+
+        <article class="inv-chart-card">
+            <h3>Revenue vs Production Cost</h3>
+            <p class="inv-chart-sub">Extended item amounts on a shared currency scale.</p>
+            <div class="cost-legend">
+                <span><i class="legend-swatch revenue"></i>Invoice revenue</span>
+                <span><i class="legend-swatch cost"></i>Production cost</span>
+            </div>
+            {% for row in chart_rows %}
+            <div class="money-chart-row">
+                <div class="money-chart-name"><strong>{{ row.description }}</strong><span>{{ row.unit }}</span></div>
+                <div class="money-bar-row">
+                    <span>Revenue</span><div class="money-bar-track"><div class="money-bar-fill" data-width="{{ row.revenue_pct }}"></div></div>
+                    <span class="money-bar-value">{{ row.revenue|as_currency_compact:currency }}</span>
+                </div>
+                <div class="money-bar-row">
+                    <span>Cost</span><div class="money-bar-track"><div class="money-bar-fill cost" data-width="{{ row.production_cost_pct }}"></div></div>
+                    <span class="money-bar-value">{{ row.production_cost|as_currency_compact:currency }}</span>
+                </div>
+            </div>
+            {% endfor %}
+            <div class="inv-overview-row"><span>Total production cost</span><strong>{{ total_production_cost|as_currency:currency }}</strong></div>
+        </article>
+    </div>
+    {% else %}
+    <div class="inv-chart-card" style="margin-top:16px;"><p class="inv-chart-sub">Add invoice items to see quantity, price and production-cost graphs.</p></div>
+    {% endif %}
+</section>
+
+{# -- Invoice line items -- #}
+<section class="budget-tab-panel" id="inv-items-panel" role="tabpanel" aria-labelledby="tab-inv-items" tabindex="0" hidden>
+<div class="table-card" style="border:none; padding:0; box-shadow:none;">
+    <div class="table-card-head">
+        <div>
+            <h3>Invoice Items</h3>
+            <span class="row-count">{{ items|length }} item{{ items|length|pluralize }} &middot; {{ invoice.number }}</span>
+        </div>
+        {% if can_write %}<a class="btn btn-secondary" href="{{ edit_url }}">Edit Items</a>{% endif %}
+    </div>
+    {% if items %}
+    <div style="overflow-x:auto;">
+    <table class="inv-items">
+        <thead><tr><th>#</th><th>Description</th><th class="num">Quantity</th><th class="num">Rate</th><th class="num">Unit Cost</th><th class="num">Production Cost</th><th class="num">Amount ({{ currency.code }})</th></tr></thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td><strong class="desc">{{ item.description }}</strong>{% if item.detail %}<div class="sub">{{ item.detail }}</div>{% endif %}</td>
+                <td class="num">{{ item.quantity|floatformat:"-2" }} {{ item.unit }}</td>
+                <td class="num">{{ item.unit_price|as_currency:currency }}</td>
+                <td class="num">{{ item.unit_cost|as_currency:currency }}</td>
+                <td class="num">{{ item.production_cost|as_currency:currency }}</td>
+                <td class="num amount"><strong>{{ item.total|as_currency:currency }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr><td colspan="6" class="num">Subtotal</td><td class="num">{{ subtotal|as_currency:currency }}</td></tr>
+            <tr><td colspan="6" class="num">Tax ({{ invoice.tax_percent|floatformat:"-2" }}%)</td><td class="num">{{ tax_amount|as_currency:currency }}</td></tr>
+            <tr><td colspan="6" class="num">Discount</td><td class="num">{{ invoice.discount|as_currency:currency }}</td></tr>
+            <tr class="total-row"><td colspan="6" class="num">Invoice Total</td><td class="num">{{ total|as_currency:currency }}</td></tr>
+        </tfoot>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No invoice items yet</p>{% if can_write %}<a class="link" href="{{ edit_url }}">Edit invoice to add items</a>{% endif %}</div>
+    {% endif %}
+</div>
+</section>
+
+{# -- Payment history -- #}
+<section class="budget-tab-panel" id="inv-payments" role="tabpanel" aria-labelledby="tab-inv-payments" tabindex="0" hidden>
+<div class="table-card" style="border:none; padding:0; box-shadow:none;">
+    <div class="table-card-head">
+        <h3>Payments Received</h3>
+        {% if can_write and balance > 0 and invoice.status != 'CANCELLED' %}
+        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">+ Record Payment</a>
+        {% endif %}
+    </div>
+    {% if payments %}
+    <div style="overflow-x:auto;">
+    <table class="pay-table">
+        <thead>
+            <tr><th>Receipt</th><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th><th style="text-align:right;">Actions</th></tr>
+        </thead>
+        <tbody>
+            {% for p in payments %}
+            <tr>
+                <td><strong>RCP-{{ p.pk|stringformat:"05d" }}</strong></td>
+                <td>{{ p.date|date:"d M Y" }}</td>
+                <td>{{ p.get_method_display }}</td>
+                <td>{{ p.reference|default:"-" }}</td>
+                <td class="num amount">{{ p.amount|as_currency:currency }}</td>
+                <td style="text-align:right;">
+                    <a class="receipt-link" href="{% url 'invoice_payment_receipt' invoice.pk p.pk %}">Print receipt</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No payments recorded yet</p>
+        <span>Record a payment to generate a printable receipt.</span>
+    </div>
+    {% endif %}
+</div>
+</section>
+</div>
+
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
+{% endblock %}

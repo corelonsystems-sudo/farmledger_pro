@@ -1,0 +1,12 @@
+<div class="item-row">
+    {% for field in item_form.visible_fields %}
+    {% if field.name == 'DELETE' %}
+    <div class="del"><label for="{{ field.id_for_label }}">Del</label>{{ field }}</div>
+    {% else %}
+    <div>
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}{{ field.errors }}
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>

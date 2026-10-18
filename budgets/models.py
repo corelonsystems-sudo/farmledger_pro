@@ -199,10 +199,16 @@ class BudgetIncomePlan(models.Model):
     budget = models.ForeignKey(Budget, on_delete=models.CASCADE, related_name='income_plans')
     line_code = models.CharField(max_length=50, blank=True, default='')
     funding_type = models.CharField(max_length=20, choices=FundingType.choices, default=FundingType.REVENUE)
-    schedule_line = models.ForeignKey(
-        'expenses.ScheduleLine', on_delete=models.PROTECT,
-        null=True, blank=True, related_name='budget_income_plans')
-    name = models.CharField(max_length=200, blank=True, default='')
+    income_source = models.ForeignKey(
+        'income.IncomeSource', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='budget_income_plans',
+        verbose_name='Income source',
+        help_text='The income source this funding line is attached to. '
+                  'Independent of the expenditure schedule-line catalog.')
+    name = models.CharField(
+        max_length=200, blank=True, default='',
+        verbose_name='Income line item',
+        help_text='Kept in sync with the attached income source.')
     planned_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     figure_type = models.CharField(max_length=20, choices=FigureType.choices, default=FigureType.ESTIMATE)
     notes = models.TextField(blank=True, default='')
@@ -221,16 +227,16 @@ class BudgetIncomePlan(models.Model):
         return f'{self.line_code} - {self.name}'
 
     def clean(self):
-        if self.schedule_line_id:
-            self.name = self.schedule_line.name
+        if self.income_source_id:
+            self.name = self.income_source.name
         if not self.name:
-            raise ValidationError({'schedule_line': 'Pick the schedule line for this income item.'})
+            raise ValidationError({'income_source': 'Pick the income source for this line.'})
         if self.planned_amount is not None and self.planned_amount < 0:
             raise ValidationError({'planned_amount': 'Planned income cannot be negative.'})
         if self.figure_type == FigureType.UNCONFIRMED and self.planned_amount:
             raise ValidationError({'planned_amount': 'Unconfirmed sources must have a blank or zero amount.'})
 
     def save(self, *args, **kwargs):
-        if self.schedule_line_id:
-            self.name = self.schedule_line.name
+        if self.income_source_id:
+            self.name = self.income_source.name
         return save_coded_line(self, 'INC', *args, **kwargs)

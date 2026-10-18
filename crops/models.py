@@ -721,3 +721,210 @@ class Sale(models.Model):
                 InventoryItem.objects.filter(pk=self.inventory_item_id).update(
                     quantity_on_hand=F('quantity_on_hand') + self.quantity)
             return super().delete(*args, **kwargs)
+
+
+class Invoice(models.Model):
+    """A customer invoice, optionally raised from a sale, with payments."""
+
+    class Status(models.TextChoices):
+        DRAFT = 'DRAFT', 'Draft'
+        ISSUED = 'ISSUED', 'Issued'
+        PARTIAL = 'PARTIAL', 'Partially paid'
+        PAID = 'PAID', 'Paid'
+        CANCELLED = 'CANCELLED', 'Cancelled'
+
+    farm_profile = models.ForeignKey(
+        'accounts.FarmProfile',
+        on_delete=models.CASCADE,
+        related_name='invoices',
+    )
+    number = models.CharField(max_length=20, unique=True, blank=True, default='')
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='invoices',
+        help_text='Bill-to customer from the customer catalog.',
+    )
+    buyer = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Bill-to name; filled automatically from the customer.',
+    )
+    sale = models.ForeignKey(
+        Sale,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='invoices',
+        help_text='Optional sale this invoice mirrors; deleted with the sale.',
+    )
+    date = models.DateField()
+    due_date = models.DateField(null=True, blank=True)
+    payment_terms = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='e.g. "Net 30" or "Due on receipt".')
+    reference = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Purchase order or reference number.')
+    tax_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0,
+        help_text='Tax percentage applied to the subtotal.')
+    discount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Discount amount subtracted after tax.')
+    payment_details = models.TextField(
+        blank=True, default='',
+        help_text='Bank / mobile money details shown on the invoice. '
+                  'Leave blank to use the farm\'s first active bank account.')
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.DRAFT)
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-date', '-id']
+        verbose_name = 'Invoice'
+
+    def __str__(self):
+        return f'{self.number or "Draft"} - {self.buyer or "Invoice"}'
+
+    @property
+    def subtotal(self):
+        return sum((item.total for item in self.items.all()), Decimal('0'))
+
+    @property
+    def tax_amount(self):
+        return self.subtotal * (self.tax_percent or Decimal('0')) / Decimal('100')
+
+    @property
+    def total(self):
+        """Amount due: subtotal + tax - discount."""
+        return max(
+            self.subtotal + self.tax_amount - (self.discount or Decimal('0')),
+            Decimal('0'))
+
+    @property
+    def amount_paid(self):
+        return sum((p.amount for p in self.payments.all()), Decimal('0'))
+
+    @property
+    def balance(self):
+        return max(self.total - self.amount_paid, Decimal('0'))
+
+    def clean(self):
+        errors = {}
+        if self.customer_id:
+            self.buyer = self.customer.name
+        if not self.buyer:
+            errors['buyer'] = 'Pick a customer or type a bill-to name.'
+        if self.due_date and self.date and self.due_date < self.date:
+            errors['due_date'] = 'The due date cannot be before the invoice date.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.customer_id:
+            self.buyer = self.customer.name
+        if not self.number:
+            import re
+            numbers = Invoice.objects.values_list('number', flat=True)
+            seq = [int(m.group(1)) for n in numbers
+                   if (m := re.match(r'INV-(\d+)$', n or ''))]
+            self.number = f'INV-{max(seq, default=0) + 1:05d}'
+        super().save(*args, **kwargs)
+        self.refresh_status()
+
+    def refresh_status(self):
+        """Derive payment status from recorded payments (drafts excluded)."""
+        if self.status in (self.Status.DRAFT, self.Status.CANCELLED):
+            return
+        paid = self.amount_paid
+        if paid <= 0:
+            target = self.Status.ISSUED
+        elif paid >= self.total:
+            target = self.Status.PAID
+        else:
+            target = self.Status.PARTIAL
+        if self.status != target:
+            self.status = target
+            super().save(update_fields=['status', 'updated_at'])
+
+
+class InvoiceItem(models.Model):
+    invoice = models.ForeignKey(
+        Invoice, on_delete=models.CASCADE, related_name='items')
+    description = models.CharField(max_length=250)
+    detail = models.CharField(
+        max_length=250, blank=True, default='',
+        help_text='Optional sub-line shown under the description, e.g. grade or packaging.')
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    unit = models.CharField(max_length=20, default='kg')
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    unit_cost = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text='Production cost per unit, for internal margin analysis.')
+
+    class Meta:
+        ordering = ['pk']
+
+    def __str__(self):
+        return f'{self.description} ({self.quantity} {self.unit})'
+
+    @property
+    def total(self):
+        return (self.quantity or Decimal('0')) * (self.unit_price or Decimal('0'))
+
+    @property
+    def production_cost(self):
+        return (self.quantity or Decimal('0')) * (self.unit_cost or Decimal('0'))
+
+    def clean(self):
+        errors = {}
+        if self.quantity is not None and self.quantity <= 0:
+            errors['quantity'] = 'Quantity must be greater than zero.'
+        if self.unit_price is not None and self.unit_price < 0:
+            errors['unit_price'] = 'Unit price cannot be negative.'
+        if self.unit_cost is not None and self.unit_cost < 0:
+            errors['unit_cost'] = 'Production cost cannot be negative.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class InvoicePayment(models.Model):
+    """A payment received against an invoice; each one gets a printable receipt."""
+
+    class Method(models.TextChoices):
+        CASH = 'CASH', 'Cash'
+        BANK = 'BANK', 'Bank Transfer'
+        MOBILE = 'MOBILE', 'Mobile Money'
+        CHEQUE = 'CHEQUE', 'Cheque'
+        OTHER = 'OTHER', 'Other'
+
+    invoice = models.ForeignKey(
+        Invoice, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    date = models.DateField()
+    method = models.CharField(max_length=10, choices=Method.choices, default=Method.CASH)
+    reference = models.CharField(max_length=100, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', '-id']
+        verbose_name = 'Invoice Payment'
+
+    def __str__(self):
+        return f'{self.invoice.number} payment {self.amount}'
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({'amount': 'Payment amount must be greater than zero.'})
+        if self.invoice_id and self.invoice.status == Invoice.Status.CANCELLED:
+            raise ValidationError({'invoice': 'Cancelled invoices cannot receive payments.'})
+        if (self.invoice_id and self.amount is not None
+                and self.amount > self.invoice.balance):
+            raise ValidationError({
+                'amount': f'Payment exceeds the outstanding balance ({self.invoice.balance}).'})

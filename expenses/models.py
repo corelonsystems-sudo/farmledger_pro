@@ -21,14 +21,13 @@ class ScheduleLine(models.Model):
     def __str__(self):
         return f'{self.code} - {self.name}'
 
-    def clean(self):
-        from django.core.exceptions import ValidationError
-        if self.pk and ScheduleLine.objects.filter(pk=self.pk).exclude(code=self.code).exists():
-            raise ValidationError({'code': 'The identifier cannot be changed after creation.'})
-
     def save(self, *args, **kwargs):
-        self.clean()
         super().save(*args, **kwargs)
+
+
+def _default_schedule_line():
+    line = ScheduleLine.objects.filter(code='part1_other').first()
+    return line.pk if line else None
 
 
 class Category(models.Model):
@@ -69,11 +68,10 @@ class Category(models.Model):
     )
     schedule_f_line = models.ForeignKey(
         ScheduleLine,
-        to_field='code',
         db_column='schedule_f_line',
         on_delete=models.PROTECT,
         related_name='budget_codes',
-        default='part1_other',
+        default=_default_schedule_line,
         verbose_name='Budget Schedule Line',
     )
     description = models.TextField(blank=True, default='')

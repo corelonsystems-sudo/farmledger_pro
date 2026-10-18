@@ -1,0 +1,67 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Receipt {{ payment.pk|stringformat:"05d" }} - FarmLedger Pro{% endblock %}
+{% block nav_invoices %}active{% endblock %}
+
+{% block extra_head %}
+<style>
+    .doc-wrap { max-width:640px; margin:0 auto; }
+    .doc-actions { display:flex; justify-content:space-between; margin-bottom:16px; }
+    .doc-actions .btn-primary { background:var(--primary); color:white; border:none; }
+    .doc-actions .btn-secondary { background:#e2e8f0; color:var(--text); border:none; }
+    .receipt { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:32px; }
+    .receipt-head { text-align:center; border-bottom:2px solid #1b4332; padding-bottom:16px; margin-bottom:20px; }
+    .receipt-logo { width:56px; height:56px; border-radius:12px; background:#1b4332; color:#d8f3dc; display:grid; place-items:center; font-size:1.3rem; font-weight:800; overflow:hidden; margin:0 auto 10px; }
+    .receipt-logo img { width:100%; height:100%; object-fit:cover; }
+    .receipt-head h2 { margin:0; color:#1b4332; font-size:1.1rem; }
+    .receipt-head p { margin:2px 0 0; font-size:.72rem; color:#64748b; }
+    .receipt-title { font-size:1.3rem; letter-spacing:.14em; color:#1b4332; font-weight:800; margin-top:10px; }
+    .receipt-no { font-size:.74rem; color:#64748b; }
+    .receipt-body { margin-bottom:18px; }
+    .receipt-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px dashed #d4dcd7; font-size:.84rem; }
+    .receipt-row span { color:#64748b; }
+    .receipt-row strong { text-align:right; }
+    .amount-box { background:#f4f7f5; border:1px solid #d4dcd7; border-radius:8px; padding:14px; text-align:center; margin-bottom:18px; }
+    .amount-box .figure { font-size:1.5rem; font-weight:800; color:#1b4332; }
+    .amount-box .caption { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:#8a988f; margin-top:3px; }
+    .receipt-foot { text-align:center; font-size:.68rem; color:#8a988f; border-top:1px dashed #d4dcd7; padding-top:14px; }
+    .receipt-sign { display:flex; justify-content:space-between; margin-top:34px; font-size:.72rem; color:#64748b; }
+    .receipt-sign div { width:40%; border-top:1px solid #9fb2a7; padding-top:5px; text-align:center; }
+    @media print { .sidebar,.topbar,.doc-actions { display:none!important; } .main { margin:0; padding:0; } .receipt { border:0; padding:0; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="doc-wrap">
+    <div class="doc-actions">
+        <a class="btn btn-secondary" href="{% url 'invoice_detail' invoice.pk %}">&larr; Back to {{ invoice.number }}</a>
+        <button class="btn btn-primary" type="button" onclick="window.print()">Print Receipt</button>
+    </div>
+    <article class="receipt">
+        <div class="receipt-head">
+            <div class="receipt-logo" aria-hidden="true">{% if invoice.farm_profile.logo %}<img src="{{ invoice.farm_profile.logo.url }}" alt="">{% else %}{{ invoice.farm_profile.farm_name|first|upper }}{% endif %}</div>
+            <h2>{{ invoice.farm_profile.farm_name }}</h2>
+            <p>{{ invoice.farm_profile.location|default:"" }}{% if invoice.farm_profile.location and invoice.farm_profile.phone %} &middot;{% endif %} {{ invoice.farm_profile.phone|default:"" }}</p>
+            <div class="receipt-title">PAYMENT RECEIPT</div>
+            <div class="receipt-no">Receipt RCP-{{ payment.pk|stringformat:"05d" }} &middot; Invoice {{ invoice.number }}</div>
+        </div>
+        <div class="amount-box">
+            <div class="figure">{{ payment.amount|as_currency:currency }}</div>
+            <div class="caption">Amount received</div>
+        </div>
+        <div class="receipt-body">
+            <div class="receipt-row"><span>Received from</span><strong>{{ invoice.buyer|default:"-" }}</strong></div>
+            <div class="receipt-row"><span>Date</span><strong>{{ payment.date|date:"d F Y" }}</strong></div>
+            <div class="receipt-row"><span>Payment method</span><strong>{{ payment.get_method_display }}</strong></div>
+            {% if payment.reference %}<div class="receipt-row"><span>Reference</span><strong>{{ payment.reference }}</strong></div>{% endif %}
+            <div class="receipt-row"><span>Invoice total</span><strong>{{ invoice.total|as_currency:currency }}</strong></div>
+            <div class="receipt-row"><span>Balance after this payment</span><strong>{{ balance_after|as_currency:currency }}</strong></div>
+        </div>
+        {% if payment.notes %}<div class="receipt-row"><span>Notes</span><strong>{{ payment.notes }}</strong></div>{% endif %}
+        <div class="receipt-sign">
+            <div>Received by</div>
+            <div>Authorised signature</div>
+        </div>
+        <div class="receipt-foot">Thank you for your payment. This receipt was issued by {{ invoice.farm_profile.farm_name }}.</div>
+    </article>
+</div>
+{% endblock %}

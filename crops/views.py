@@ -3,14 +3,18 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Prefetch
-from django.http import Http404, HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 
 from accounts.access import accessible_farms, scoped_queryset
 
-from .models import Crop, CropSeason, HarvestRecord, ProcessingStage, Sale
+from .models import (
+    Crop, CropSeason, Customer, HarvestRecord, Invoice, InvoiceItem,
+    InvoicePayment, ProcessingStage, Sale,
+)
 
 
 def _sold_qty(sales, unit):
@@ -19,7 +23,7 @@ def _sold_qty(sales, unit):
 
 
 def _crop_stock_chart(rows):
-    """SVG two-line chart over generic rows {'label','sold','in_store'} —
+    """SVG two-line chart over generic rows {'label','sold','in_store'} â€”
     cumulative quantity sold against remaining stock in store, one shared
     quantity axis. None when rows is empty."""
     import math
@@ -996,3 +1000,755 @@ def waste_detail_view(request, pk):
             request.user, write_model='crops.sale').exists(),
     }
     return render(request, 'crops/waste_detail.html', context)
+
+
+# ---------------- Invoices & receipts ----------------
+
+def _invoice_write_farms(user):
+    return accessible_farms(user, write_model='crops.invoice')
+
+
+def _sale_farm(sale):
+    """Farm a sale belongs to (mirrors services._sale_farm_profile)."""
+    harvest = sale.harvest
+    if harvest and harvest.crop_season_id and harvest.crop_season.field_id:
+        return harvest.crop_season.field.farm_profile
+    if sale.inventory_item_id:
+        return sale.inventory_item.farm_profile
+    return None
+
+
+@login_required
+def invoice_list_view(request):
+    from django.core.paginator import Paginator
+    from django.db.models import DecimalField, F, Q, Sum
+    from django.db.models.functions import Coalesce
+
+    q = request.GET.get('q', '')
+    status = request.GET.get('status', '')
+    customer_id = request.GET.get('customer', '')
+
+    queryset = scoped_queryset(
+        Invoice, request.user,
+        Invoice.objects.select_related('customer').prefetch_related('items', 'payments'))
+    queryset = queryset.annotate(
+        billed=Coalesce(Sum(
+            F('items__quantity') * F('items__unit_price'),
+            output_field=DecimalField()), Decimal('0'), output_field=DecimalField()),
+        paid=Coalesce(Sum('payments__amount', output_field=DecimalField()),
+                      Decimal('0'), output_field=DecimalField()),
+    )
+    if q:
+        queryset = queryset.filter(
+            Q(number__icontains=q) | Q(buyer__icontains=q) | Q(notes__icontains=q))
+    if status:
+        queryset = queryset.filter(status=status)
+    if customer_id:
+        queryset = queryset.filter(customer_id=customer_id)
+
+    today = date.today()
+    rows = []
+    for inv in queryset:
+        balance = max(inv.billed - inv.paid, Decimal('0'))
+        rows.append({
+            'pk': inv.pk,
+            'number': inv.number,
+            'buyer': inv.buyer or (inv.customer.name if inv.customer else '-'),
+            'date': inv.date,
+            'due_date': inv.due_date,
+            'total': inv.billed,
+            'paid': inv.paid,
+            'balance': balance,
+            'status': inv.status,
+            'status_label': inv.get_status_display(),
+            'overdue': bool(inv.due_date and inv.due_date < today and balance > 0
+                            and inv.status != Invoice.Status.CANCELLED),
+            'detail_url': reverse('invoice_detail', args=[inv.pk]),
+            'payment_url': reverse('invoice_record_payment', args=[inv.pk]),
+            'edit_url': reverse('invoice_edit', args=[inv.pk]),
+            'delete_url': reverse('invoice_delete', args=[inv.pk]),
+        })
+
+    stats = [
+        {'label': 'Invoices', 'value': len(rows), 'icon': 'layers', 'color': 'green'},
+        {'label': 'Total Billed', 'value': sum((r['total'] for r in rows), Decimal('0')),
+         'icon': 'money', 'color': 'blue', 'is_money': True},
+        {'label': 'Outstanding', 'value': sum((r['balance'] for r in rows), Decimal('0')),
+         'icon': 'money', 'color': 'amber', 'is_money': True},
+        {'label': 'Overdue', 'value': sum(1 for r in rows if r['overdue']),
+         'icon': 'check', 'color': 'red'},
+    ]
+    can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
+    context = {
+        'rows': rows,
+        'stats': stats,
+        'q': q,
+        'status': status,
+        'customer_id': customer_id,
+        'status_choices': Invoice.Status.choices,
+        'customers': scoped_queryset(Customer, request.user).order_by('name'),
+        'can_write': can_write,
+        'create_url': reverse('invoice_create'),
+        'title': 'Invoices',
+        'subtitle': 'Bill customers for produce and inventory sales, record payments, and print.',
+        'today': today,
+    }
+    return render(request, 'invoices/invoice_list.html', context)
+
+
+class InvoiceForm(forms.ModelForm):
+    class Meta:
+        model = Invoice
+        fields = ['farm_profile', 'customer', 'buyer', 'date', 'due_date',
+                  'payment_terms', 'reference', 'tax_percent', 'discount',
+                  'payment_details', 'status', 'notes']
+        widgets = {
+            'buyer': forms.TextInput(attrs={'placeholder': 'Leave blank to use the customer name'}),
+            'payment_terms': forms.TextInput(attrs={'placeholder': 'e.g. Net 30'}),
+            'reference': forms.TextInput(attrs={'placeholder': 'PO / reference number'}),
+            'payment_details': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Bank name, account name, account no, mobile money...'}),
+            'notes': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Notes & terms shown on the invoice...'}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        farms = _invoice_write_farms(user) if user else accessible_farms(None)
+        self.fields['farm_profile'].queryset = farms
+        self.fields['farm_profile'].initial = farms.first()
+        self.fields['customer'].queryset = scoped_queryset(
+            Customer, user, Customer.objects.all()) if user else Customer.objects.none()
+        self.fields['customer'].required = False
+        self.fields['buyer'].required = False
+        if self.instance.pk is None:
+            self.fields['date'].initial = date.today()
+
+
+@login_required
+def invoice_form_view(request, pk=None):
+    from django.forms import inlineformset_factory
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user, Invoice.objects.all()), pk=pk) if pk else Invoice()
+    if pk is None and not (_invoice_write_farms(request.user).exists()
+                           or request.user.is_superuser):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+    Items = inlineformset_factory(
+        Invoice, InvoiceItem,
+        fields=['description', 'detail', 'quantity', 'unit', 'unit_price', 'unit_cost'],
+        extra=1, can_delete=True, max_num=50, validate_max=True)
+    data = request.POST if request.method == 'POST' else None
+    form = InvoiceForm(data, instance=invoice, user=request.user)
+    items = Items(data, instance=invoice, prefix='items')
+    if data is not None:
+        if form.is_valid() and items.is_valid():
+            with transaction.atomic():
+                invoice = form.save()
+                items.instance = invoice
+                items.save()
+                invoice.refresh_status()
+            return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))
+    return render(request, 'invoices/invoice_form.html', {
+        'form': form,
+        'items': items,
+        'invoice': invoice,
+        'action': 'Edit' if pk else 'New',
+    })
+
+
+@login_required
+def invoice_detail_view(request, pk):
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user,
+                        Invoice.objects.select_related('customer', 'farm_profile__default_currency')),
+        pk=pk)
+    items = list(invoice.items.all())
+    payments = list(invoice.payments.all())
+    bank = invoice.farm_profile.bank_accounts.filter(is_active=True).first()
+    max_quantity = max((item.quantity for item in items), default=Decimal('0'))
+    max_unit_price = max((item.unit_price for item in items), default=Decimal('0'))
+    max_unit_cost = max((item.unit_cost for item in items), default=Decimal('0'))
+    max_money = max(
+        max((item.total for item in items), default=Decimal('0')),
+        max((item.production_cost for item in items), default=Decimal('0')))
+    chart_rows = []
+    for item in items:
+        chart_rows.append({
+            'description': item.description,
+            'detail': item.detail,
+            'quantity': item.quantity,
+            'unit': item.unit,
+            'unit_price': item.unit_price,
+            'unit_cost': item.unit_cost,
+            'revenue': item.total,
+            'production_cost': item.production_cost,
+            'quantity_pct': round(float(item.quantity / max_quantity * 100), 1) if max_quantity else 0,
+            'price_pct': round(float(item.unit_price / max_unit_price * 100), 1) if max_unit_price else 0,
+            'cost_pct': round(float(item.unit_cost / max_unit_cost * 100), 1) if max_unit_cost else 0,
+            'revenue_pct': round(float(item.total / max_money * 100), 1) if max_money else 0,
+            'production_cost_pct': round(float(item.production_cost / max_money * 100), 1) if max_money else 0,
+        })
+    can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
+    return render(request, 'invoices/invoice_detail.html', {
+        'invoice': invoice,
+        'items': items,
+        'chart_rows': chart_rows,
+        'total_production_cost': sum((item.production_cost for item in items), Decimal('0')),
+        'payments': payments,
+        'subtotal': invoice.subtotal,
+        'tax_amount': invoice.tax_amount,
+        'total': invoice.total,
+        'amount_paid': invoice.amount_paid,
+        'balance': invoice.balance,
+        'bank': bank,
+        'can_write': can_write,
+        'payment_url': reverse('invoice_record_payment', args=[invoice.pk]),
+        'edit_url': reverse('invoice_edit', args=[invoice.pk]),
+        'delete_url': reverse('invoice_delete', args=[invoice.pk]),
+        'pdf_url': reverse('invoice_pdf', args=[invoice.pk]),
+    })
+
+
+@login_required
+def invoice_pdf_view(request, pk):
+    """Download the invoice as a print-ready PDF (reportlab)."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import (
+        HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate, Spacer,
+        Table, TableStyle)
+
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user,
+                        Invoice.objects.select_related('customer', 'farm_profile')),
+        pk=pk)
+    items = list(invoice.items.all())
+    bank = invoice.farm_profile.bank_accounts.filter(is_active=True).first()
+    farm = invoice.farm_profile
+    currency_obj = farm.default_currency
+    symbol = currency_obj.symbol if currency_obj else ''
+
+    def money(value):
+        return f'{symbol} {value:,.2f}'
+
+    primary = colors.HexColor('#2d6a4f')
+    dark = colors.HexColor('#1b4332')
+    muted = colors.HexColor('#64748b')
+    label_style = ParagraphStyle(
+        'SectionLabel', fontName='Helvetica-Bold', fontSize=7.5, leading=10,
+        textColor=primary)
+    name_style = ParagraphStyle(
+        'Name', fontName='Helvetica-Bold', fontSize=11, leading=14, textColor=dark)
+    muted_style = ParagraphStyle(
+        'Muted', fontName='Helvetica', fontSize=8, leading=11, textColor=muted)
+    cell_style = ParagraphStyle(
+        'Cell', fontName='Helvetica', fontSize=8.5, leading=11, textColor=dark)
+    cell_muted = ParagraphStyle('CellMuted', parent=cell_style, fontSize=7.5, textColor=muted)
+    cell_bold = ParagraphStyle('CellBold', parent=cell_style, fontName='Helvetica-Bold')
+    numeric_style = ParagraphStyle(
+        'Numeric', parent=cell_style, alignment=2, fontName='Helvetica')
+    numeric_bold = ParagraphStyle(
+        'NumericBold', parent=numeric_style, fontName='Helvetica-Bold')
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=0, bottomMargin=38 * mm, title=f'Invoice {invoice.number}')
+
+    class LastPageSignatureCanvas(canvas.Canvas):
+        """Keep the authorization area and thank-you line at the page foot."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            saved = self._saved_page_states
+            page_count = len(saved)
+            for state in saved:
+                self.__dict__.update(state)
+                if self._pageNumber == page_count:
+                    self._draw_invoice_footer()
+                canvas.Canvas.showPage(self)
+            canvas.Canvas.save(self)
+
+        def _draw_invoice_footer(self):
+            page_width, _ = A4
+            right = page_width - 18 * mm
+            line_start = right - 56 * mm
+            signature_y = 28 * mm
+            self.setStrokeColor(colors.HexColor('#9ca3af'))
+            self.setLineWidth(.65)
+            self.line(line_start, signature_y, right, signature_y)
+            self.setFillColor(muted)
+            self.setFont('Helvetica', 7)
+            self.drawCentredString(
+                (line_start + right) / 2, signature_y - 4 * mm,
+                'Authorized signature')
+
+            self.setStrokeColor(colors.HexColor('#e3ebe6'))
+            self.setLineWidth(.5)
+            self.line(18 * mm, 14 * mm, right, 14 * mm)
+            self.setFillColor(dark)
+            self.setFont('Helvetica-Bold', 9)
+            self.drawCentredString(
+                page_width / 2, 8 * mm, 'Thank you for your business!')
+
+    story = []
+    # Top accent bar
+    bar = Table([['']], colWidths=[doc.width], rowHeights=[4 * mm])
+    bar.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), primary)]))
+    story.append(bar)
+    story.append(Spacer(1, 10 * mm))
+
+    if farm.logo:
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(farm.logo.path) as pim:
+                lw, lh = pim.size
+            logo_img = RLImage(farm.logo.path, height=14 * mm,
+                               width=14 * mm * (lw / lh) if lh else 14 * mm)
+            logo_img.hAlign = 'LEFT'
+            story.append(logo_img)
+            story.append(Spacer(1, 2 * mm))
+        except Exception:
+            pass
+
+    contact = ' Â· '.join(p for p in (farm.location, farm.phone, farm.email) if p)
+    head_left = [
+        Paragraph(escape(farm.farm_name), ParagraphStyle(
+            'Farm', fontName='Helvetica-Bold', fontSize=16, leading=20, textColor=dark)),
+        Paragraph(escape(contact), muted_style),
+    ]
+    head_right = [
+        Paragraph('INVOICE', ParagraphStyle(
+            'InvTitle', fontName='Helvetica-Bold', fontSize=26, leading=30,
+            alignment=2, textColor=dark)),
+        Paragraph(escape(f'No. {invoice.number}'), ParagraphStyle(
+            'InvNo', fontName='Helvetica-Bold', fontSize=9, leading=12,
+            alignment=2, textColor=primary)),
+    ]
+    head = Table([[head_left, head_right]], colWidths=[doc.width * 0.55, doc.width * 0.45])
+    head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    story.append(head)
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width='100%', thickness=1.2, color=dark))
+    story.append(Spacer(1, 7 * mm))
+
+    billed = [
+        Paragraph('BILLED TO', label_style),
+        Spacer(1, 1.5 * mm),
+        Paragraph(escape(invoice.buyer or '-'), name_style),
+    ]
+    if invoice.customer:
+        for line in (invoice.customer.phone, invoice.customer.email):
+            if line:
+                billed.append(Paragraph(escape(line), muted_style))
+    details_rows = [[Paragraph('INVOICE DETAILS', label_style), '']]
+    for key, value in (
+            ('Invoice date', invoice.date.strftime('%d / %m / %Y')),
+            ('Due date', invoice.due_date.strftime('%d / %m / %Y') if invoice.due_date else '-'),
+            ('Payment terms', invoice.payment_terms or '-'),
+            ('Reference', invoice.reference or '-')):
+        details_rows.append([
+            Paragraph(escape(key), muted_style),
+            Paragraph(escape(value), ParagraphStyle(
+                'DetailValue', parent=muted_style, alignment=2,
+                fontName='Helvetica-Bold', textColor=dark)),
+        ])
+    details = Table(details_rows, colWidths=[doc.width * .23, doc.width * .20])
+    details.setStyle(TableStyle([
+        ('SPAN', (0, 0), (-1, 0)),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 1), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 2),
+    ]))
+    meta = Table([[billed, details]], colWidths=[doc.width * 0.55, doc.width * 0.45])
+    meta.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    story.append(meta)
+    story.append(Spacer(1, 9 * mm))
+
+    # Items table
+    data = [['DESCRIPTION', 'QTY', 'RATE', 'AMOUNT']]
+    for item in items:
+        desc = [Paragraph(escape(item.description), cell_bold)]
+        if item.detail:
+            desc.append(Paragraph(escape(item.detail), cell_muted))
+        data.append([
+            desc,
+            Paragraph(f'{item.quantity:,.2f} {escape(item.unit)}', numeric_style),
+            Paragraph(money(item.unit_price), numeric_style),
+            Paragraph(money(item.total), numeric_bold),
+        ])
+    if not items:
+        data.append(['No line items yet', '', '', ''])
+    t = Table(data, colWidths=[
+        doc.width * 0.47, doc.width * 0.14, doc.width * 0.19, doc.width * 0.20])
+    t.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, 0), 1, dark),
+        ('LINEBELOW', (0, 1), (-1, -2), 0.4, colors.HexColor('#e3ebe6')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), dark),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8 * mm))
+
+    # Payment details + totals
+    pay_lines = []
+    if invoice.payment_details:
+        for line in invoice.payment_details.splitlines():
+            if line.strip():
+                pay_lines.append(Paragraph(escape(line.strip()), cell_style))
+    elif bank:
+        pay_lines = [
+            Paragraph('<font color="#64748b">Bank</font>&nbsp;&nbsp;&nbsp;&nbsp;'
+                      f'<b>{escape(bank.bank_name)}</b>', cell_style),
+            Paragraph('<font color="#64748b">Account name</font>&nbsp;&nbsp;&nbsp;&nbsp;'
+                      f'<b>{escape(bank.name)}</b>', cell_style),
+            Paragraph('<font color="#64748b">Account no</font>&nbsp;&nbsp;&nbsp;&nbsp;'
+                      f'<b>â€¢â€¢â€¢â€¢ {escape(bank.account_number_last4 or "----")}</b>', cell_style),
+        ]
+    pay_block = [Paragraph('PAYMENT DETAILS', label_style), Spacer(1, 1.5 * mm)] + pay_lines
+
+    # Highlight Total Due with color only; keep its type size and weight aligned
+    # with the other summary amounts.
+    total_label = ParagraphStyle(
+        'TotalLabel', parent=cell_style, alignment=0, textColor=primary)
+    total_value = ParagraphStyle(
+        'TotalValue', parent=numeric_style, alignment=2, textColor=primary)
+    totals = [
+        [Paragraph('Subtotal', cell_style), Paragraph(money(invoice.subtotal), numeric_style)],
+        [Paragraph(f'Tax ({escape(str(invoice.tax_percent or 0))}%)', cell_style),
+         Paragraph(money(invoice.tax_amount), numeric_style)],
+        [Paragraph('Discount', cell_style), Paragraph(money(invoice.discount or 0), numeric_style)],
+        [Paragraph('TOTAL DUE', total_label), Paragraph(money(invoice.total), total_value)],
+        [Paragraph('Amount paid', cell_style), Paragraph(money(invoice.amount_paid), numeric_style)],
+        [Paragraph('<b>Balance due</b>', cell_style),
+         Paragraph(money(invoice.balance), ParagraphStyle(
+             'BalanceValue', parent=numeric_bold, textColor=colors.HexColor('#b91c1c')))],
+    ]
+    totals_table = Table(totals, colWidths=[doc.width * 0.17, doc.width * 0.19])
+    totals_table.hAlign = 'RIGHT'
+    totals_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    bottom = Table([[pay_block, totals_table]],
+                   colWidths=[doc.width * 0.62, doc.width * 0.38])
+    bottom.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    story.append(bottom)
+    story.append(Spacer(1, 9 * mm))
+
+    if invoice.notes:
+        story.append(Paragraph('NOTES & TERMS', label_style))
+        story.append(Spacer(1, 1.5 * mm))
+        for line in invoice.notes.splitlines():
+            if line.strip():
+                story.append(Paragraph(escape(line.strip()), muted_style))
+        story.append(Spacer(1, 12 * mm))
+
+    doc.build(story, canvasmaker=LastPageSignatureCanvas)
+    resp = HttpResponse(buf.getvalue(), content_type='application/pdf')
+    resp['Content-Disposition'] = f'attachment; filename="{invoice.number or "invoice"}.pdf"'
+    return resp
+
+
+class InvoicePaymentForm(forms.ModelForm):
+    class Meta:
+        model = InvoicePayment
+        fields = ['amount', 'date', 'method', 'reference', 'notes']
+        widgets = {
+            'reference': forms.TextInput(attrs={'placeholder': 'Receipt no, transaction id...'}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, invoice=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.invoice = invoice
+        if invoice is not None:
+            self.fields['amount'].help_text = f'Outstanding balance: {invoice.balance}'
+            self.fields['amount'].initial = invoice.balance
+            self.fields['date'].initial = date.today()
+
+
+
+    def clean_amount(self):
+        amount = self.cleaned_data['amount']
+        if self.invoice is not None and amount > self.invoice.balance:
+            raise forms.ValidationError(
+                f'Payment exceeds the outstanding balance ({self.invoice.balance}).')
+        return amount
+
+
+@login_required
+def invoice_record_payment_view(request, pk):
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user, write=True), pk=pk)
+    if request.method == 'POST':
+        form = InvoicePaymentForm(request.POST, invoice=invoice)
+        if form.is_valid():
+            payment = form.save(commit=False)
+            payment.invoice = invoice
+            payment.save()
+            invoice.refresh_status()
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'ok': True, 'redirect': reverse(
+                    'invoice_detail', args=[invoice.pk])})
+            return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))
+    else:
+        form = InvoicePaymentForm(invoice=invoice)
+    return render(request, 'dashboard/form.html', {
+        'app': 'crops', 'model': 'invoice', 'model_name': 'Invoice Payment',
+        'form': form, 'action': 'Record',
+    })
+
+
+@login_required
+def invoice_delete_view(request, pk):
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user, write=True), pk=pk)
+    if request.method == 'POST':
+        invoice.delete()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'ok': True, 'redirect': reverse('invoice_list')})
+        return HttpResponseRedirect(reverse('invoice_list'))
+    return render(request, 'dashboard/confirm_delete.html', {
+        'model_name': 'Invoice',
+        'obj': str(invoice),
+        'protected_counts': [],
+    })
+
+
+
+
+def _receipt_pdf_response(farm, *, title, amount, amount_caption, rows, filename):
+    """Render a one-page receipt as a downloadable PDF in the invoice style."""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate, Spacer,
+        Table, TableStyle)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=0, bottomMargin=22 * mm,
+        title=title[0] if isinstance(title, tuple) else title)
+    primary = colors.HexColor('#2d6a4f')
+    dark = colors.HexColor('#1b4332')
+    muted = colors.HexColor('#64748b')
+    border = colors.HexColor('#e3ebe6')
+    label_style = ParagraphStyle(
+        'SectionLabel', fontName='Helvetica-Bold', fontSize=7.5, leading=10,
+        textColor=primary)
+    muted_style = ParagraphStyle(
+        'Muted', fontName='Helvetica', fontSize=8, leading=11, textColor=muted)
+    cell_style = ParagraphStyle(
+        'Cell', fontName='Helvetica', fontSize=8.5, leading=11, textColor=dark)
+    numeric_style = ParagraphStyle('Numeric', parent=cell_style, alignment=2)
+
+    currency_obj = getattr(farm, 'default_currency', None)
+    symbol = currency_obj.symbol if currency_obj else ''
+
+    def money(value):
+        return f'{symbol} {value:,.2f}'
+
+    story = []
+    accent = Table([['']], colWidths=[doc.width], rowHeights=[4 * mm])
+    accent.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), primary)]))
+    story.append(accent)
+    story.append(Spacer(1, 9 * mm))
+
+    if farm and getattr(farm, 'logo', None):
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(farm.logo.path) as pim:
+                lw, lh = pim.size
+            logo_img = RLImage(farm.logo.path, height=14 * mm,
+                               width=14 * mm * (lw / lh) if lh else 14 * mm)
+            logo_img.hAlign = 'LEFT'
+            story.append(logo_img)
+            story.append(Spacer(1, 2 * mm))
+        except Exception:
+            pass
+    contact = ' · '.join(p for p in ((farm.location if farm else ''),
+                            (farm.phone if farm else ''), (farm.email if farm else '')) if p)
+    head_left = [
+        Paragraph(escape(farm.farm_name if farm else 'FarmLedger Pro'), ParagraphStyle(
+            'FarmName', fontName='Helvetica-Bold', fontSize=16, leading=20,
+            textColor=dark)),
+        Paragraph(escape(contact), muted_style),
+    ]
+    title_text, subtitle_text = title
+    head_right = [
+        Paragraph(escape(title_text), ParagraphStyle(
+            'ReceiptTitle', fontName='Helvetica-Bold', fontSize=18, leading=22,
+            alignment=2, textColor=dark)),
+        Paragraph(escape(subtitle_text), ParagraphStyle(
+            'ReceiptSub', fontName='Helvetica-Bold', fontSize=9, leading=12,
+            alignment=2, textColor=primary)),
+    ]
+    head = Table([[head_left, head_right]], colWidths=[doc.width * .58, doc.width * .42])
+    head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    story.append(head)
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width='100%', thickness=1.2, color=dark))
+    story.append(Spacer(1, 8 * mm))
+
+    # Amount box
+    amount_box = Table([
+        [Paragraph(escape(amount_caption), label_style)],
+        [Paragraph(money(amount), ParagraphStyle(
+            'Amount', fontName='Helvetica-Bold', fontSize=21, leading=25,
+            textColor=dark))],
+    ], colWidths=[doc.width])
+    amount_box.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f7faf8')),
+        ('BOX', (0, 0), (-1, -1), 1, border),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        ('BOTTOMPADDING', (0, -1), (-1, -1), 9),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+    story.append(amount_box)
+    story.append(Spacer(1, 8 * mm))
+
+    details = Table(
+        [[Paragraph(escape(key), muted_style),
+          Paragraph(escape(value), numeric_style)] for key, value in rows],
+        colWidths=[doc.width * .52, doc.width * .48])
+    details.setStyle(TableStyle([
+        ('LINEBELOW', (0, 0), (-1, -1), .5, border),
+        ('TEXTCOLOR', (0, 0), (0, -1), muted),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+    ]))
+    story.append(details)
+
+    story.append(Spacer(1, 14 * mm))
+    sig = Table([
+        ['', '________________________'],
+        ['', Paragraph('Authorized signature', ParagraphStyle(
+            'Sig', parent=muted_style, alignment=2, fontSize=7))],
+    ], colWidths=[doc.width * .58, doc.width * .42])
+    sig.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM')]))
+    story.append(sig)
+    story.append(Spacer(1, 12 * mm))
+    story.append(HRFlowable(width='100%', thickness=.5, color=border))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph('Thank you for your payment.', ParagraphStyle(
+        'Thanks', fontName='Helvetica-Bold', fontSize=9.5, alignment=1,
+        textColor=dark)))
+
+    doc.build(story)
+    response = HttpResponse(buf.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+@login_required
+def invoice_payment_receipt_view(request, pk, payment_pk):
+    invoice = get_object_or_404(
+        scoped_queryset(Invoice, request.user,
+                        Invoice.objects.select_related('farm_profile__default_currency')),
+        pk=pk)
+    payment = get_object_or_404(InvoicePayment, pk=payment_pk, invoice=invoice)
+    title = (
+        'PAYMENT RECEIPT',
+        f'Receipt RCP-{payment.pk:05d} - Invoice {invoice.number}')
+    rows = [
+        ('Received from', invoice.buyer or invoice.customer.name if invoice.customer else '-'),
+        ('Date received', payment.date.strftime('%d / %m / %Y')),
+        ('Payment method', payment.get_method_display()),
+        ('Reference', payment.reference or '-'),
+        ('Invoice total', f'{invoice.total:,.2f}'),
+        ('Balance after payment', f'{invoice.balance:,.2f}'),
+    ]
+    if payment.notes:
+        rows.append(('Notes', payment.notes))
+    barcode_value = f'RCP-{payment.pk:05d}'
+    return _receipt_pdf_response(
+        invoice.farm_profile, title=title, amount=payment.amount,
+        amount_caption='Amount received', rows=rows, filename=f'{barcode_value}.pdf')
+
+
+@login_required
+def sale_receipt_view(request, pk):
+    """Download a printable receipt for a sale's collected payment."""
+    sale = get_object_or_404(
+        scoped_queryset(
+            Sale, request.user,
+            Sale.objects.select_related(
+                'harvest__crop_season__crop', 'harvest__crop_season__field',
+                'processing_stage', 'customer', 'inventory_item',
+                'inventory_item__farm_profile__default_currency'),
+        ),
+        pk=pk,
+    )
+    farm = _sale_farm(sale)
+    if sale.processing_stage and sale.harvest:
+        sale_desc = f'{sale.harvest.crop_season.crop.name} - {sale.processing_stage.name}'
+    elif sale.harvest:
+        sale_desc = sale.harvest.crop_season.crop.name
+    elif sale.inventory_item:
+        sale_desc = sale.inventory_item.name
+    else:
+        sale_desc = 'Produce'
+    rows = [
+        ('Sold to', sale.buyer or '-'),
+        ('Item', sale_desc),
+        ('Quantity', f'{sale.quantity:,.2f} {sale.unit}'),
+        ('Unit price', f'{sale.unit_price:,.2f}'),
+        ('Payment method', sale.get_payment_method_display()),
+        ('Sale total', f'{sale.total_amount:,.2f}'),
+        ('Balance outstanding', f'{sale.receivable:,.2f}'),
+    ]
+    return _receipt_pdf_response(
+        farm, title=('SALE RECEIPT', f'Receipt SLC-{sale.pk:05d} - {sale.sale_date.strftime("%d / %m / %Y")}'),
+        amount=sale.amount_received, amount_caption='Amount received',
+        rows=rows, filename=f'sale-receipt-{sale.pk:05d}.pdf')
+
+
+@login_required
+def sale_generate_invoice_view(request, pk):
+    """Open the sale's automatic invoice (creates it if missing)."""
+    sale = get_object_or_404(
+        scoped_queryset(Sale, request.user, write=True), pk=pk)
+    if request.method != 'POST':
+        return HttpResponseRedirect(reverse('model_list', args=['crops', 'sale']))
+    from .services import sync_sale_invoice
+    sync_sale_invoice(sale)
+    invoice = sale.invoices.first()
+    if invoice is None:
+        from django.contrib import messages
+        messages.error(request, 'This sale has no farm assigned; it cannot be invoiced.')
+        return HttpResponseRedirect(reverse('model_list', args=['crops', 'sale']))
+    return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))

@@ -1,8 +1,12 @@
+from datetime import date
+
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 
 from accounts.models import FarmProfile, User
-from budgets.models import Budget
+from budgets.models import Budget, BudgetItem
+from expenses.models import BudgetSubCode, Expense
+from income.models import IncomeSource
 
 # Create your tests here.
 
@@ -107,7 +111,8 @@ class StructuredBudgetTests(TestCase):
         self.subcode = BudgetSubCode.objects.create(category=self.category, code='CM-1', name='Crop Maintenance')
         self.other_subcode = BudgetSubCode.objects.create(category=self.other_category, code='LV-1', name='Livestock Feeding')
         self.bare_subcode = BudgetSubCode.objects.create(category=self.category, code='CM-9', name='Bare head')
-        self.schedule_line = ScheduleLine.objects.create(code='OWN-FUNDS', name='Own funds')
+        self.income_source = IncomeSource.objects.create(name='Own funds')
+        self.maize_source = IncomeSource.objects.create(name='Maize sales')
         self.item_line = ScheduleLine.objects.create(code='WEED', name='Weed control', subcode=self.subcode)
         self.item_line_b = ScheduleLine.objects.create(code='PEST', name='Pest control', subcode=self.subcode)
         self.other_item_line = ScheduleLine.objects.create(code='FEED', name='Feed mixing', subcode=self.other_subcode)
@@ -119,7 +124,7 @@ class StructuredBudgetTests(TestCase):
             'start_date': '2026-01-01', 'end_date': '2026-12-31', 'status': 'DRAFT', 'notes': '',
             'incomes-TOTAL_FORMS': '1', 'incomes-INITIAL_FORMS': '0',
             'incomes-0-line_code': 'INC-01', 'incomes-0-funding_type': 'CAPITAL',
-            'incomes-0-schedule_line': self.schedule_line.pk, 'incomes-0-planned_amount': '1000',
+            'incomes-0-income_source': self.income_source.pk, 'incomes-0-planned_amount': '1000',
             'incomes-0-figure_type': 'RECORDED', 'incomes-0-notes': 'Confirmed contribution',
             'items-TOTAL_FORMS': '2', 'items-INITIAL_FORMS': '0',
             'items-0-line_code': 'CROP-01-a', 'items-0-cost_centre': 'Crops',
@@ -141,7 +146,7 @@ class StructuredBudgetTests(TestCase):
         data = self.payload()
         data.update({'incomes-TOTAL_FORMS': '2', 'incomes-1-line_code': 'INC-02',
                      'incomes-1-funding_type': 'REVENUE',
-                     'incomes-1-schedule_line': self.schedule_line.pk,
+                     'incomes-1-income_source': self.maize_source.pk,
                      'incomes-1-planned_amount': '', 'incomes-1-figure_type': 'ESTIMATE',
                      'incomes-1-notes': ''})
         response = self.client.post(reverse('budget_new'), data)
@@ -153,7 +158,6 @@ class StructuredBudgetTests(TestCase):
         self.assertEqual(budget.funding_balance, 700)
         self.assertEqual(budget.items.get(line_code='CROP-01-b').figure_type, 'ESTIMATE')
         income = budget.income_plans.get(planned_amount=1000)
-        self.assertEqual(income.schedule_line, self.schedule_line)
         self.assertEqual(income.name, 'Own funds')
         self.assertEqual(Income.objects.count(), 0)
         page = self.client.get(reverse('budget_detail', kwargs={'pk': budget.pk}))
@@ -510,3 +514,52 @@ class BudgetBurnChartTests(TestCase):
         self.assertIsNone(response.context['burn_chart'])
         self.assertNotContains(response, '<article class="burn-chart">')
         self.assertNotContains(response, 'class="alloc-chart"')
+
+
+class BudgetSubCodeDetailTests(TestCase):
+    """Subcode detail page: KPIs, schedule lines, items and allocation donut."""
+
+    def setUp(self):
+        from decimal import Decimal
+        from expenses.models import Category, ScheduleLine
+        self.user = User.objects.create_user(username='sub-owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Sub Farm')
+        self.category = Category.objects.create(name='Crop code', code='CROP')
+        self.subcode = BudgetSubCode.objects.create(
+            category=self.category, code='CROP-A', name='Harvest handling',
+            description='Post-harvest handling costs')
+        self.line = ScheduleLine.objects.create(
+            code='harvest_handling', name='Harvest handling line', subcode=self.subcode)
+        self.budget = Budget.objects.create(
+            farm_profile=self.farm, name='FY Sub', start_date=date(2026, 1, 1),
+            end_date=date(2026, 12, 31))
+        self.item = BudgetItem.objects.create(
+            budget=self.budget, category=self.category, subcode=self.subcode,
+            schedule_line=self.line, line_code='SUB-1', planned_amount=Decimal('1000'))
+        Expense.objects.create(
+            farm_profile=self.farm, budget_item=self.item, category=self.category,
+            schedule_line=self.line, date=date(2026, 2, 1), amount=Decimal('400'))
+        self.client.force_login(self.user)
+
+    def test_subcode_detail_renders_sections(self):
+        from decimal import Decimal
+        response = self.client.get(
+            reverse('budget_subcode_detail', kwargs={'pk': self.subcode.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Harvest handling')
+        self.assertContains(response, 'role="tablist"')
+        self.assertContains(response, 'Planned Allocation by Schedule Line')
+        self.assertContains(response, 'class="donut"')
+        self.assertEqual(response.context['total_planned'], Decimal('1000'))
+        self.assertEqual(response.context['total_spent'], Decimal('400'))
+        self.assertEqual(response.context['execution_pct'], 40.0)
+        self.assertEqual(response.context['lines'][0].items_used, 1)
+        # Non-superusers get no edit affordances.
+        self.assertNotContains(response, 'Edit Subcode')
+
+    def test_code_detail_links_to_subcode_detail(self):
+        response = self.client.get(
+            reverse('budget_code_detail', kwargs={'pk': self.category.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, reverse('budget_subcode_detail', kwargs={'pk': self.subcode.pk}))
