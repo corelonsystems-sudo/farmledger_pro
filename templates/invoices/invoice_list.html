@@ -10,8 +10,7 @@
     .inv-toolbar p { margin:0; color:#dcece2; font-size:.8rem; }
     .inv-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
     .inv-toolbar .btn-primary:hover { background:#e4f1e9; }
-    .inv-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
-    .inv-filters input, .inv-filters select { padding:8px 10px; border:1px solid var(--border); border-radius:8px; font:inherit; font-size:.8rem; background:white; }
+
     .inv-table { width:100%; border-collapse:collapse; }
     .inv-table th { text-align:left; color:var(--text-muted); font-size:.68rem; font-weight:700; padding:9px 12px; border-bottom:1px solid var(--border); text-transform:uppercase; letter-spacing:.04em; background:#f8fafc; white-space:nowrap; }
     .inv-table td { padding:10px 12px; border-bottom:1px solid var(--border); font-size:.82rem; }
@@ -30,7 +29,7 @@
     .action-btn:hover { background:#d8f3dc; }
     .action-btn.delete { background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
     .empty-state { text-align:center; padding:40px 0; color:var(--text-muted); }
-    @media print { .sidebar,.topbar,.inv-toolbar .btn,.inv-filters,.no-print { display:none!important; } .main { margin:0; padding:0; } }
+    @media print { .sidebar,.topbar,.inv-toolbar .btn,.no-print { display:none!important; } .main { margin:0; padding:0; } }
 </style>
 {% endblock %}
 
@@ -50,24 +49,6 @@
     <div class="kpi-card"><div><div class="kpi-label">{{ s.label }}</div><div class="kpi-value">{% if s.is_money %}{{ s.value|as_currency:currency }}{% else %}{{ s.value }}{% endif %}</div></div></div>
     {% endfor %}
 </div>
-
-<form class="inv-filters" method="get">
-    <input type="search" name="q" value="{{ q }}" placeholder="Search number, buyer, notes...">
-    <select name="status">
-        <option value="">All statuses</option>
-        {% for value, label in status_choices %}
-        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-    </select>
-    <select name="customer">
-        <option value="">All customers</option>
-        {% for c in customers %}
-        <option value="{{ c.pk }}" {% if customer_id == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
-        {% endfor %}
-    </select>
-    <button class="btn btn-secondary" type="submit">Filter</button>
-    {% if q or status or customer_id %}<a class="action-btn" href="">Reset</a>{% endif %}
-</form>
 
 <div class="table-card">
     <div class="table-card-head">
@@ -98,6 +79,8 @@
                 <td style="text-align:right;">
                     <div class="row-actions">
                         <a class="action-btn" href="{{ r.detail_url }}">View</a>
+                        <a class="action-btn" href="{{ r.pdf_url }}">Print</a>
+                        <a class="action-btn" href="{{ r.pdf_url }}">PDF</a>
                         {% if can_write and r.status != 'PAID' and r.status != 'CANCELLED' and r.balance > 0 %}
                         <a class="action-btn" href="javascript:void(0)" data-modal-url="{{ r.payment_url }}" data-modal-title="Record Payment - {{ r.number }}">Payment</a>
                         {% endif %}

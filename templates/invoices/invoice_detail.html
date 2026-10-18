@@ -80,30 +80,26 @@
     .inv-chart-card { min-width:0; background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
     .inv-chart-card h3 { margin:0 0 4px; color:#1b4332; font-size:.9rem; }
     .inv-chart-sub { margin:0 0 14px; color:#64748b; font-size:.72rem; }
-    .metric-item { padding:10px 0; border-top:1px solid #e3ebe6; }
-    .metric-item:first-of-type { border-top:0; }
-    .metric-item-title { display:flex; justify-content:space-between; gap:12px; margin-bottom:7px; font-size:.76rem; }
-    .metric-item-title strong { color:#1b4332; }
-    .metric-row { display:grid; grid-template-columns:84px minmax(30px,1fr) auto; gap:8px; align-items:center; margin:5px 0; font-size:.67rem; }
-    .metric-row > span:first-child { color:#64748b; }
-    .metric-track { height:8px; background:#e3ebe6; border-radius:999px; overflow:hidden; }
-    .metric-fill { height:100%; border-radius:inherit; background:#2d6a4f; }
-    .metric-fill.price { background:#e9a226; }
-    .metric-fill.cost { background:#c66a4a; }
-    .metric-value { color:#374151; font-variant-numeric:tabular-nums; text-align:right; }
     .cost-legend { display:flex; gap:15px; flex-wrap:wrap; font-size:.68rem; color:#64748b; margin-bottom:12px; }
     .cost-legend span { display:inline-flex; align-items:center; gap:6px; }
     .legend-swatch { width:9px; height:9px; border-radius:2px; display:inline-block; }
     .legend-swatch.revenue { background:#2d6a4f; }
     .legend-swatch.cost { background:#e9a226; }
-    .money-chart-row { padding:10px 0; border-top:1px solid #e3ebe6; }
-    .money-chart-name { display:flex; justify-content:space-between; gap:10px; margin-bottom:6px; font-size:.74rem; }
-    .money-chart-name strong { color:#1b4332; }
-    .money-bar-row { display:grid; grid-template-columns:66px minmax(30px,1fr) 76px; align-items:center; gap:7px; margin:4px 0; font-size:.66rem; color:#64748b; }
-    .money-bar-track { height:9px; background:#e3ebe6; border-radius:999px; overflow:hidden; }
-    .money-bar-fill { height:100%; border-radius:inherit; background:#2d6a4f; }
-    .money-bar-fill.cost { background:#e9a226; }
-    .money-bar-value { text-align:right; color:#374151; font-variant-numeric:tabular-nums; }
+    .inv-line-chart { width:100%; height:auto; display:block; }
+    .lc-grid { stroke:#e3ebe6; stroke-width:1; }
+    .lc-axis { stroke:#cbd5d0; stroke-width:1.2; }
+    .lc-tick { fill:#94a3b8; font-size:9px; }
+    .lc-x-label { fill:#64748b; font-size:9.5px; }
+    .lc-line { fill:none; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+    .lc-line.rev { stroke:#2d6a4f; }
+    .lc-line.cost { stroke:#e9a226; }
+    .lc-dot.rev { fill:#2d6a4f; }
+    .lc-dot.cost { fill:#e9a226; }
+    .inv-summary-table { width:100%; border-collapse:collapse; margin-bottom:6px; }
+    .inv-summary-table th { padding:7px 10px; text-align:left; color:#64748b; font-size:.64rem; text-transform:uppercase; border-bottom:1px solid #d4dcd7; }
+    .inv-summary-table td { padding:8px 10px; border-bottom:1px solid #e8eeea; font-size:.78rem; color:#1b4332; }
+    .inv-summary-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .sum-detail { display:block; color:#64748b; font-size:.68rem; }
     @media(max-width:720px) { .inv-overview-grid { grid-template-columns:1fr; } .inv-body { padding:22px 18px; } }
     @media(max-width:900px) { .inv-chart-grid { grid-template-columns:1fr; } }
     @media print {
@@ -205,55 +201,55 @@
     {% if chart_rows %}
     <div class="inv-chart-grid">
         <article class="inv-chart-card">
-            <h3>Quantity, Price &amp; Production Cost</h3>
-            <p class="inv-chart-sub">Per-item indicators. Each measure is scaled against its own largest line item.</p>
-            {% for row in chart_rows %}
-            <div class="metric-item">
-                <div class="metric-item-title">
-                    <strong>{{ row.description }}</strong>
-                    {% if row.detail %}<span style="color:#64748b;">{{ row.detail }}</span>{% endif %}
-                </div>
-                <div class="metric-row">
-                    <span>Quantity</span><div class="metric-track"><div class="metric-fill" data-width="{{ row.quantity_pct }}"></div></div>
-                    <span class="metric-value">{{ row.quantity|floatformat:"-2" }} {{ row.unit }}</span>
-                </div>
-                <div class="metric-row">
-                    <span>Unit price</span><div class="metric-track"><div class="metric-fill price" data-width="{{ row.price_pct }}"></div></div>
-                    <span class="metric-value">{{ row.unit_price|as_currency:currency }}/{{ row.unit }}</span>
-                </div>
-                <div class="metric-row">
-                    <span>Unit cost</span><div class="metric-track"><div class="metric-fill cost" data-width="{{ row.cost_pct }}"></div></div>
-                    <span class="metric-value">{{ row.unit_cost|as_currency:currency }}/{{ row.unit }}</span>
-                </div>
-            </div>
-            {% endfor %}
-        </article>
-
-        <article class="inv-chart-card">
             <h3>Revenue vs Production Cost</h3>
-            <p class="inv-chart-sub">Extended item amounts on a shared currency scale.</p>
+            <p class="inv-chart-sub">Item amounts on a shared currency scale.</p>
             <div class="cost-legend">
                 <span><i class="legend-swatch revenue"></i>Invoice revenue</span>
                 <span><i class="legend-swatch cost"></i>Production cost</span>
             </div>
-            {% for row in chart_rows %}
-            <div class="money-chart-row">
-                <div class="money-chart-name"><strong>{{ row.description }}</strong><span>{{ row.unit }}</span></div>
-                <div class="money-bar-row">
-                    <span>Revenue</span><div class="money-bar-track"><div class="money-bar-fill" data-width="{{ row.revenue_pct }}"></div></div>
-                    <span class="money-bar-value">{{ row.revenue|as_currency_compact:currency }}</span>
-                </div>
-                <div class="money-bar-row">
-                    <span>Cost</span><div class="money-bar-track"><div class="money-bar-fill cost" data-width="{{ row.production_cost_pct }}"></div></div>
-                    <span class="money-bar-value">{{ row.production_cost|as_currency_compact:currency }}</span>
-                </div>
-            </div>
-            {% endfor %}
+            {% if line_chart %}
+            <svg class="inv-line-chart" viewBox="0 0 {{ line_chart.width }} {{ line_chart.height }}" role="img" aria-label="Revenue versus production cost line chart">
+                {% for t in line_chart.ticks %}
+                <line class="lc-grid" x1="{{ line_chart.plot_left }}" y1="{{ t.y }}" x2="{{ line_chart.plot_right }}" y2="{{ t.y }}"/>
+                <text class="lc-tick" x="{{ line_chart.plot_left|add:'-6' }}" y="{{ t.label_y }}" text-anchor="end">{{ t.value|as_currency_compact:currency }}</text>
+                {% endfor %}
+                <line class="lc-axis" x1="{{ line_chart.plot_left }}" y1="{{ line_chart.axis_y }}" x2="{{ line_chart.plot_right }}" y2="{{ line_chart.axis_y }}"/>
+                <polyline class="lc-line cost" points="{{ line_chart.cost_points }}"/>
+                <polyline class="lc-line rev" points="{{ line_chart.rev_points }}"/>
+                {% for p in line_chart.points %}
+                <circle class="lc-dot cost" cx="{{ p.x }}" cy="{{ p.cy }}" r="3.5"/>
+                <circle class="lc-dot rev" cx="{{ p.x }}" cy="{{ p.ry }}" r="3.5"/>
+                <text class="lc-x-label" x="{{ p.x }}" y="{{ line_chart.x_label_y }}" text-anchor="middle">{{ p.label }}</text>
+                {% endfor %}
+            </svg>
+            {% endif %}
+        </article>
+
+        <article class="inv-chart-card">
+            <h3>Invoice Item Summary</h3>
+            <p class="inv-chart-sub">{{ items|length }} line item{{ items|length|pluralize }} on {{ invoice.number }}.</p>
+            <table class="inv-summary-table" data-no-filter>
+                <thead><tr><th>#</th><th>Item</th><th class="num">Amount</th></tr></thead>
+                <tbody>
+                {% for row in chart_rows %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td>{{ row.description }}
+                        <span class="sum-detail">{{ row.quantity|floatformat:"-2" }} {{ row.unit }} &times; {{ row.unit_price|as_currency:currency }}</span>
+                    </td>
+                    <td class="num">{{ row.revenue|as_currency:currency }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <div class="inv-overview-row"><span>Subtotal</span><strong>{{ subtotal|as_currency:currency }}</strong></div>
+            {% if tax_amount %}<div class="inv-overview-row"><span>Tax</span><strong>{{ tax_amount|as_currency:currency }}</strong></div>{% endif %}
+            <div class="inv-overview-row total"><span>Total due</span><strong>{{ total|as_currency:currency }}</strong></div>
             <div class="inv-overview-row"><span>Total production cost</span><strong>{{ total_production_cost|as_currency:currency }}</strong></div>
         </article>
     </div>
     {% else %}
-    <div class="inv-chart-card" style="margin-top:16px;"><p class="inv-chart-sub">Add invoice items to see quantity, price and production-cost graphs.</p></div>
+    <div class="inv-chart-card" style="margin-top:16px;"><p class="inv-chart-sub">Add invoice items to see the revenue-vs-cost graph and item summary.</p></div>
     {% endif %}
 </section>
 

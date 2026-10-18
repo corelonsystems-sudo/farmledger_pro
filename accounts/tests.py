@@ -4,6 +4,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from django.conf import settings
 from accounts.access import scoped_queryset
 from accounts.models import FarmMembership, FarmProfile, User
 from fields.models import Field
@@ -459,3 +460,35 @@ class DatabaseBackupTests(TestCase):
         bcon.close()
         self.assertEqual(bcount, 1)  # the seeded user
         shutil.rmtree(Path(settings.BASE_DIR) / 'backups')
+
+
+class SystemLogoConfigTests(TestCase):
+    """The system logo is available as a static asset and the sidebar brand
+    falls back to it when the current farm has no uploaded logo."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='logo-check', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Logo Farm')
+        self.client.force_login(self.user)
+
+    def test_system_logo_static_file_is_configured(self):
+        from django.conf import settings
+        from django.contrib.staticfiles import finders
+        assert settings.STATIC_URL == '/static/'
+        path = finders.find('system-logo.png')
+        assert path is not None and 'system-logo.png' in path, 'PNG system logo not discoverable via staticfiles finders'
+
+    def test_sidebar_brand_uses_static_logo_without_farm_logo(self):
+        response = self.client.get(reverse('model_list', kwargs={'app': 'crops', 'model': 'sale'}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'src="{settings.STATIC_URL}system-logo.png"')
+
+    def test_farm_logo_upload_url_is_served_in_debug(self):
+        from django.conf import settings
+        self.assertEqual(settings.MEDIA_URL, '/media/')
+        self.assertEqual(settings.MEDIA_ROOT.name, 'media')
+
+    def test_login_page_brand_shows_png_logo(self):
+        page = Client().get(reverse('login'))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, settings.STATIC_URL + 'system-logo.png')

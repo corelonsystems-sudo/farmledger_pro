@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,7 +13,8 @@
         .intro { display: flex; flex-direction: column; justify-content: space-between; padding: clamp(30px, 5vw, 74px); color: #fff; background: linear-gradient(145deg, #133626, var(--forest) 55%, #40916c); position: relative; overflow: hidden; }
         .intro::after { content: ''; position: absolute; width: 520px; height: 520px; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; right: -210px; bottom: -220px; box-shadow: 0 0 0 70px rgba(255,255,255,.035), 0 0 0 145px rgba(255,255,255,.025); pointer-events: none; }
         .brand { display: inline-flex; align-items: center; gap: 12px; font-size: 1.18rem; font-weight: 750; letter-spacing: -.02em; position: relative; z-index: 1; }
-        .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.16); }
+        .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.16); overflow:hidden; }
+        .brand-mark img { width: 100%; height: 100%; object-fit: cover; }
         .brand-mark svg { width: 26px; height: 26px; }
         .intro-copy { max-width: 480px; position: relative; z-index: 1; }
         .eyebrow { display: inline-flex; padding: 7px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; background: rgba(255,255,255,.08); font-size: .71rem; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
@@ -44,7 +46,7 @@
     <main class="layout">
         <section class="intro" aria-label="About FarmLedger Pro">
             <div class="brand">
-                <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21V10M12 15c-5 0-8-3-8-9 5 0 8 2 8 9ZM12 13c0-5 3-8 8-9 0 5-2 8-8 9Z"/></svg></span>
+                <span class="brand-mark" aria-hidden="true"><img src="{% static 'system-logo.png' %}" alt=""></span>
                 FarmLedger Pro
             </div>
             <div class="intro-copy">

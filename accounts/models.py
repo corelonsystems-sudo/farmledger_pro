@@ -54,6 +54,7 @@ class FarmProfile(models.Model):
         related_name='farm_profile',
     )
     farm_name = models.CharField(max_length=200)
+    tagline = models.CharField(max_length=200, blank=True, default='')
     location = models.CharField(max_length=300, blank=True, default='')
     acreage = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_id = models.CharField(max_length=50, blank=True, default='')
@@ -61,6 +62,13 @@ class FarmProfile(models.Model):
     phone = models.CharField(max_length=30, blank=True, default='')
     email = models.EmailField(blank=True, default='')
     logo = models.ImageField(upload_to='farm_logos/', null=True, blank=True)
+    invoice_payment_details = models.TextField(
+        blank=True, default='',
+        help_text='Default payment instructions printed on invoices '
+                  '(bank, account name, account no., mobile money...).')
+    invoice_notes = models.TextField(
+        blank=True, default='',
+        help_text='Default notes & terms printed on invoices.')
     default_currency = models.ForeignKey(
         Currency,
         on_delete=models.SET_NULL,

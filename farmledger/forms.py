@@ -48,21 +48,33 @@ from livestock.models import (
 class FarmProfileForm(forms.ModelForm):
     class Meta:
         model = FarmProfile
-        fields = ['farm_name', 'location', 'acreage', 'tax_id', 'fiscal_year_start',
-                  'phone', 'email', 'default_currency', 'logo']
+        fields = ['farm_name', 'tagline', 'location', 'acreage', 'tax_id', 'fiscal_year_start',
+                  'phone', 'email', 'default_currency', 'logo',
+                  'invoice_payment_details', 'invoice_notes']
         widgets = {
             'farm_name': forms.TextInput(attrs={'placeholder': 'e.g. Green Valley Farm'}),
+            'tagline': forms.TextInput(attrs={'placeholder': 'e.g. Coffee - Plants - Livestock'}),
             'location': forms.TextInput(attrs={'placeholder': 'City, State, Country'}),
             'acreage': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'tax_id': forms.TextInput(attrs={'placeholder': 'Tax ID / EIN'}),
             'fiscal_year_start': forms.DateInput(attrs={'type': 'date'}),
             'phone': forms.TextInput(attrs={'placeholder': '+1 555-000-0000'}),
             'email': forms.EmailInput(attrs={'placeholder': 'farm@example.com'}),
+            'invoice_payment_details': forms.Textarea(attrs={
+                'rows': 3,
+                'placeholder': 'Default payment instructions for invoices '
+                               '(bank, account name, account no., mobile money...)'}),
+            'invoice_notes': forms.Textarea(attrs={
+                'rows': 3,
+                'placeholder': 'Default notes & terms printed on invoices '
+                               '(e.g. payment is due within 30 days...)'}),
         }
         labels = {
             'farm_name': 'Farm Name',
             'tax_id': 'Tax ID / EIN',
             'default_currency': 'Display currency',
+            'invoice_payment_details': 'Invoice payment details',
+            'invoice_notes': 'Invoice notes & terms',
         }
 
 
@@ -464,9 +476,10 @@ class CustomerForm(forms.ModelForm):
     class Meta:
         from crops.models import Customer
         model = Customer
-        fields = ['farm_profile', 'name', 'phone', 'email', 'notes']
+        fields = ['farm_profile', 'name', 'tin', 'phone', 'email', 'notes']
         widgets = {
             'name': forms.TextInput(attrs={'placeholder': 'e.g. Kampala Traders Ltd'}),
+            'tin': forms.TextInput(attrs={'placeholder': 'e.g. 1000123456'}),
             'phone': forms.TextInput(attrs={'placeholder': '+256 ...'}),
             'email': forms.EmailInput(attrs={'placeholder': 'customer@example.com'}),
             'notes': forms.Textarea(attrs={'rows': 3}),

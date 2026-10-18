@@ -433,6 +433,9 @@ class Customer(models.Model):
         related_name='customers',
     )
     name = models.CharField(max_length=150)
+    tin = models.CharField(
+        'TIN', max_length=15, blank=True, default='',
+        help_text='Uganda Revenue Authority Tax Identification Number.')
     phone = models.CharField(max_length=40, blank=True, default='')
     email = models.EmailField(blank=True, default='')
     notes = models.TextField(blank=True, default='')

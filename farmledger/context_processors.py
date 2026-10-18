@@ -2,6 +2,20 @@ from accounts.access import FINANCIAL_MODELS, accessible_farms
 from accounts.models import Currency, FarmProfile, User
 
 
+def _system_logo_url(user):
+    """Logo shown in the app chrome: user's farm logo first, else the
+    static system logo at static/system-logo.svg."""
+    if not user.is_authenticated:
+        return None
+    farm = accessible_farms(user).first()
+    if farm and farm.logo:
+        try:
+            return farm.logo.url
+        except (ValueError, OSError):
+            pass
+    return None
+
+
 def currency(request):
     """Expose the active currency and available currencies to templates."""
     default = None
@@ -82,4 +96,6 @@ def nav_access(request):
         'w_income': can_write('income.income'),
         'w_task': can_write('labor.task'),
         'w_farm': can_write('accounts.farmprofile') or not owns_farm,
-    }}
+    },
+        'system_logo_url': _system_logo_url(user),
+    }

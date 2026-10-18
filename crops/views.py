@@ -1067,6 +1067,7 @@ def invoice_list_view(request):
             'payment_url': reverse('invoice_record_payment', args=[inv.pk]),
             'edit_url': reverse('invoice_edit', args=[inv.pk]),
             'delete_url': reverse('invoice_delete', args=[inv.pk]),
+            'pdf_url': reverse('invoice_pdf', args=[inv.pk]),
         })
 
     stats = [
@@ -1121,6 +1122,12 @@ class InvoiceForm(forms.ModelForm):
         self.fields['buyer'].required = False
         if self.instance.pk is None:
             self.fields['date'].initial = date.today()
+            default_farm = farms.first()
+            if default_farm:
+                if default_farm.invoice_payment_details:
+                    self.initial['payment_details'] = default_farm.invoice_payment_details
+                if default_farm.invoice_notes:
+                    self.initial['notes'] = default_farm.invoice_notes
 
 
 @login_required
@@ -1187,11 +1194,56 @@ def invoice_detail_view(request, pk):
             'revenue_pct': round(float(item.total / max_money * 100), 1) if max_money else 0,
             'production_cost_pct': round(float(item.production_cost / max_money * 100), 1) if max_money else 0,
         })
+    line_chart = None
+    if chart_rows:
+        import math
+        width, height = 620, 240
+        m_left, m_right, m_top, m_bottom = 58, 14, 12, 30
+        plot_w = width - m_left - m_right
+        plot_h = height - m_top - m_bottom
+        raw_step = float(max_money) / 4 if max_money else 0
+        mag = 10 ** math.floor(math.log10(raw_step)) if raw_step > 0 else 1
+        step = next(
+            (m * mag for m in (1, 2, 2.5, 5, 10) if raw_step <= m * mag),
+            mag)
+        top_value = step * 4 or 1
+
+        def y_pos(value):
+            return m_top + plot_h - (float(value) / top_value) * plot_h
+
+        count = len(chart_rows)
+
+        def x_pos(i):
+            return m_left + (plot_w * i / (count - 1)
+                             if count > 1 else plot_w / 2)
+
+        points, rev_pts, cost_pts = [], [], []
+        for i, row in enumerate(chart_rows):
+            xi = round(x_pos(i), 1)
+            ry = round(y_pos(row['revenue']), 1)
+            cy = round(y_pos(row['production_cost']), 1)
+            rev_pts.append(f'{xi},{ry}')
+            cost_pts.append(f'{xi},{cy}')
+            points.append({'x': xi, 'ry': ry, 'cy': cy,
+                           'label': (row['description'] or '')[:14]})
+        line_chart = {
+            'width': width, 'height': height,
+            'plot_left': m_left, 'plot_right': width - m_right,
+            'axis_y': round(m_top + plot_h, 1),
+            'x_label_y': height - 8,
+            'rev_points': ' '.join(rev_pts),
+            'cost_points': ' '.join(cost_pts),
+            'points': points,
+            'ticks': [{'y': round(y_pos(step * i), 1),
+                       'label_y': round(y_pos(step * i), 1) + 3,
+                       'value': step * i} for i in range(5)],
+        }
     can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
     return render(request, 'invoices/invoice_detail.html', {
         'invoice': invoice,
         'items': items,
         'chart_rows': chart_rows,
+        'line_chart': line_chart,
         'total_production_cost': sum((item.production_cost for item in items), Decimal('0')),
         'payments': payments,
         'subtotal': invoice.subtotal,
@@ -1206,6 +1258,125 @@ def invoice_detail_view(request, pk):
         'delete_url': reverse('invoice_delete', args=[invoice.pk]),
         'pdf_url': reverse('invoice_pdf', args=[invoice.pk]),
     })
+
+
+def _amount_in_words(amount):
+    """'1234.50' -> 'One Thousand Two Hundred Thirty-Four and 50/100'."""
+    ones = ('', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight',
+            'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen',
+            'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen')
+    tens = ('', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy',
+            'Eighty', 'Ninety')
+
+    def three(n):
+        h, r = divmod(n, 100)
+        parts = [f'{ones[h]} Hundred'] if h else []
+        if r >= 20:
+            t, o = divmod(r, 10)
+            parts.append(tens[t] + (f'-{ones[o]}' if o else ''))
+        elif r:
+            parts.append(ones[r])
+        return ' '.join(parts)
+
+    n = int(amount)
+    cents = int(round((float(amount) - n) * 100))
+    if not n:
+        words = 'Zero'
+    else:
+        groups = []
+        for scale, label in ((10 ** 9, ' Billion'), (10 ** 6, ' Million'),
+                             (10 ** 3, ' Thousand'), (1, '')):
+            g, n = divmod(n, scale)
+            if g:
+                groups.append(three(g) + label)
+        words = ' '.join(groups)
+    return f'{words} and {cents:02d}/100'
+
+
+def _fiscal_verification_code(*parts):
+    """Deterministic XXXX-XXXX-XXXX code from the document's core data."""
+    import hashlib
+    digest = hashlib.sha256('|'.join(str(p) for p in parts).encode()).hexdigest()
+    return '-'.join(digest.upper()[i:i + 4] for i in range(0, 12, 4))
+
+
+def _qr_png_bytes(payload):
+    """QR code PNG in a BytesIO buffer, ready for canvas.drawImage."""
+    from io import BytesIO as _IO
+    import qrcode
+    buf = _IO()
+    qrcode.make(payload, box_size=4, border=1).save(buf, format='PNG')
+    buf.seek(0)
+    return buf
+
+
+def _fiscal_qr_image(payload, mm_size=24):
+    """A reportlab Image flowable holding a QR code for the given payload."""
+    from reportlab.lib.units import mm as _mm
+    from reportlab.platypus import Image as _Img
+    return _Img(_qr_png_bytes(payload), width=mm_size * _mm,
+                height=mm_size * _mm)
+
+
+FISCAL_BAND_HEIGHT_MM = 30
+
+
+def _draw_fiscal_band(c, page_width, page_height, *, farm_name, tagline,
+                      contact, title, subtitle, logo_path):
+    """Plain letterhead drawn directly on the canvas (no background).
+
+    Logo beside the farm identity on the left, document title on the
+    right, closed by a thin double rule.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+
+    dark = colors.HexColor('#1b4332')
+    primary = colors.HexColor('#2d6a4f')
+    muted = colors.HexColor('#64748b')
+    band_h = FISCAL_BAND_HEIGHT_MM * mm
+    top = page_height
+
+    x = 18 * mm
+    logo_h = 19 * mm
+    if logo_path:
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(logo_path) as pim:
+                lw, lh = pim.size
+            logo_w = logo_h * (lw / lh) if lh else logo_h
+            c.drawImage(logo_path, x, top - 5.5 * mm - logo_h,
+                        width=logo_w, height=logo_h, mask='auto')
+            x += logo_w + 5 * mm
+        except Exception:
+            pass
+
+    base = top - 11 * mm
+    c.setFillColor(dark)
+    c.setFont('Helvetica-Bold', 14)
+    c.drawString(x, base, farm_name)
+    c.setFillColor(primary)
+    c.setFont('Helvetica-Bold', 6.5)
+    c.drawString(x, base - 5 * mm, tagline.upper() if tagline else '')
+    c.setFillColor(muted)
+    c.setFont('Helvetica', 7.5)
+    # c.drawString(x, base - 10.5 * mm, contact)
+
+    right = page_width - 18 * mm
+    c.setFillColor(dark)
+    c.setFont('Helvetica-Bold', 19)
+    c.drawRightString(right, top - 13 * mm, title)
+    c.setFillColor(primary)
+    c.setFont('Helvetica-Bold', 8.5)
+    c.drawRightString(right, top - 20 * mm, subtitle)
+
+    # Thin double rule closing the header.
+    c.setStrokeColor(dark)
+    c.setLineWidth(1.4)
+    c.line(18 * mm, top - band_h, right, top - band_h)
+    c.setStrokeColor(primary)
+    c.setLineWidth(0.5)
+    c.line(18 * mm, top - band_h - 1.4 * mm, right, top - band_h - 1.4 * mm)
 
 
 @login_required
@@ -1257,7 +1428,8 @@ def invoice_pdf_view(request, pk):
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
-        topMargin=0, bottomMargin=38 * mm, title=f'Invoice {invoice.number}')
+        topMargin=(FISCAL_BAND_HEIGHT_MM + 6) * mm, bottomMargin=38 * mm,
+        title=f'Invoice {invoice.number}')
 
     class LastPageSignatureCanvas(canvas.Canvas):
         """Keep the authorization area and thank-you line at the page foot."""
@@ -1275,14 +1447,50 @@ def invoice_pdf_view(request, pk):
             page_count = len(saved)
             for state in saved:
                 self.__dict__.update(state)
+                if self._pageNumber == 1:
+                    self._draw_invoice_header()
                 if self._pageNumber == page_count:
                     self._draw_invoice_footer()
                 canvas.Canvas.showPage(self)
             canvas.Canvas.save(self)
 
+        def _draw_invoice_header(self):
+            _draw_fiscal_band(
+                self, A4[0], A4[1], farm_name=farm.farm_name,
+                tagline=farm.tagline, contact=contact,
+                title='TAX INVOICE',
+                subtitle=f'No. {invoice.number}',
+                logo_path=farm.logo.path if farm.logo else None)
+
         def _draw_invoice_footer(self):
             page_width, _ = A4
+            left = 18 * mm
             right = page_width - 18 * mm
+
+            # Fiscal verification block, bottom-left beside the signature.
+            from reportlab.lib.utils import ImageReader
+            qr_size = 19 * mm
+            self.drawImage(ImageReader(qr_buf), left, 16 * mm,
+                           width=qr_size, height=qr_size, mask='auto')
+            tx = left + qr_size + 4 * mm
+            self.setFillColor(primary)
+            self.setFont('Helvetica-Bold', 7.5)
+            self.drawString(tx, 32.5 * mm, 'FISCAL VERIFICATION')
+            self.setFillColor(dark)
+            self.setFont('Helvetica-Bold', 9)
+            self.drawString(tx, 27.5 * mm, f'Verification code: {ver_code}')
+            self.setFillColor(muted)
+            self.setFont('Helvetica', 7.5)
+            self.drawString(
+                tx, 22.5 * mm,
+                f'Document no. {invoice.number or "-"} - issued '
+                f'{invoice.date.strftime("%d / %m / %Y")}')
+            self.setFont('Helvetica', 7)
+            self.drawString(
+                tx, 18 * mm,
+                'Electronically generated fiscal document - '
+                'valid without a signature.')
+
             line_start = right - 56 * mm
             signature_y = 28 * mm
             self.setStrokeColor(colors.HexColor('#9ca3af'))
@@ -1303,45 +1511,11 @@ def invoice_pdf_view(request, pk):
                 page_width / 2, 8 * mm, 'Thank you for your business!')
 
     story = []
-    # Top accent bar
-    bar = Table([['']], colWidths=[doc.width], rowHeights=[4 * mm])
-    bar.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), primary)]))
-    story.append(bar)
-    story.append(Spacer(1, 10 * mm))
-
-    if farm.logo:
-        try:
-            from PIL import Image as _PILImage
-            with _PILImage.open(farm.logo.path) as pim:
-                lw, lh = pim.size
-            logo_img = RLImage(farm.logo.path, height=14 * mm,
-                               width=14 * mm * (lw / lh) if lh else 14 * mm)
-            logo_img.hAlign = 'LEFT'
-            story.append(logo_img)
-            story.append(Spacer(1, 2 * mm))
-        except Exception:
-            pass
-
-    contact = ' Â· '.join(p for p in (farm.location, farm.phone, farm.email) if p)
-    head_left = [
-        Paragraph(escape(farm.farm_name), ParagraphStyle(
-            'Farm', fontName='Helvetica-Bold', fontSize=16, leading=20, textColor=dark)),
-        Paragraph(escape(contact), muted_style),
-    ]
-    head_right = [
-        Paragraph('INVOICE', ParagraphStyle(
-            'InvTitle', fontName='Helvetica-Bold', fontSize=26, leading=30,
-            alignment=2, textColor=dark)),
-        Paragraph(escape(f'No. {invoice.number}'), ParagraphStyle(
-            'InvNo', fontName='Helvetica-Bold', fontSize=9, leading=12,
-            alignment=2, textColor=primary)),
-    ]
-    head = Table([[head_left, head_right]], colWidths=[doc.width * 0.55, doc.width * 0.45])
-    head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
-    story.append(head)
-    story.append(Spacer(1, 4 * mm))
-    story.append(HRFlowable(width='100%', thickness=1.2, color=dark))
-    story.append(Spacer(1, 7 * mm))
+    # The letterhead band is drawn full-bleed on the canvas (see
+    # LastPageSignatureCanvas._draw_invoice_header); `contact` feeds it.
+    contact_parts = [f'TIN {farm.tax_id}'] if farm.tax_id else []
+    contact_parts += [p for p in (farm.location, farm.phone, farm.email) if p]
+    contact = ' · '.join(contact_parts)
 
     billed = [
         Paragraph('BILLED TO', label_style),
@@ -1349,6 +1523,10 @@ def invoice_pdf_view(request, pk):
         Paragraph(escape(invoice.buyer or '-'), name_style),
     ]
     if invoice.customer:
+        if invoice.customer.tin:
+            billed.append(Paragraph(
+                f'<font color="#64748b">TIN:</font> {escape(invoice.customer.tin)}',
+                muted_style))
         for line in (invoice.customer.phone, invoice.customer.email):
             if line:
                 billed.append(Paragraph(escape(line), muted_style))
@@ -1379,28 +1557,30 @@ def invoice_pdf_view(request, pk):
     story.append(Spacer(1, 9 * mm))
 
     # Items table
-    data = [['DESCRIPTION', 'QTY', 'RATE', 'AMOUNT']]
-    for item in items:
+    data = [['#', 'DESCRIPTION', 'QTY', 'RATE', 'AMOUNT']]
+    for line_no, item in enumerate(items, 1):
         desc = [Paragraph(escape(item.description), cell_bold)]
         if item.detail:
             desc.append(Paragraph(escape(item.detail), cell_muted))
         data.append([
+            Paragraph(str(line_no), muted_style),
             desc,
             Paragraph(f'{item.quantity:,.2f} {escape(item.unit)}', numeric_style),
             Paragraph(money(item.unit_price), numeric_style),
             Paragraph(money(item.total), numeric_bold),
         ])
     if not items:
-        data.append(['No line items yet', '', '', ''])
+        data.append(['', 'No line items yet', '', '', ''])
     t = Table(data, colWidths=[
-        doc.width * 0.47, doc.width * 0.14, doc.width * 0.19, doc.width * 0.20])
+        doc.width * 0.05, doc.width * 0.42, doc.width * 0.14,
+        doc.width * 0.19, doc.width * 0.20])
     t.setStyle(TableStyle([
         ('LINEBELOW', (0, 0), (-1, 0), 1, dark),
         ('LINEBELOW', (0, 1), (-1, -2), 0.4, colors.HexColor('#e3ebe6')),
         ('TEXTCOLOR', (0, 0), (-1, 0), dark),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 8.5),
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
         ('LEFTPADDING', (0, 0), (-1, -1), 5),
         ('RIGHTPADDING', (0, 0), (-1, -1), 5),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1408,24 +1588,67 @@ def invoice_pdf_view(request, pk):
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
     story.append(t)
-    story.append(Spacer(1, 8 * mm))
+    story.append(Spacer(1, 6 * mm))
+
+    # EFRIS-style tax summary (URA requirement: category, gross, tax, net).
+    rate = float(invoice.tax_percent or 0)
+    category = (f'A - Standard rate ({rate:g}%)' if rate > 0
+                else 'C - Exempt (0%)')
+    story.append(Paragraph('TAX SUMMARY', label_style))
+    story.append(Spacer(1, 1.5 * mm))
+    tax_table = Table(
+        [['Tax Category', 'Gross Amount', 'Tax Amount', 'Net Amount'],
+         [Paragraph(escape(category), cell_style),
+          Paragraph(money(invoice.subtotal + invoice.tax_amount), numeric_style),
+          Paragraph(money(invoice.tax_amount), numeric_style),
+          Paragraph(money(invoice.subtotal), numeric_style)]],
+        colWidths=[doc.width * 0.40, doc.width * 0.20,
+                   doc.width * 0.20, doc.width * 0.20])
+    tax_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f4f7f5')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), dark),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e3ebe6')),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.8, dark),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(tax_table)
+    story.append(Spacer(1, 6 * mm))
 
     # Payment details + totals
-    pay_lines = []
-    if invoice.payment_details:
-        for line in invoice.payment_details.splitlines():
+    pay_block = [Paragraph('PAYMENT DETAILS', label_style), Spacer(1, 2 * mm)]
+    payment_details = invoice.payment_details or farm.invoice_payment_details
+    if payment_details:
+        for line in payment_details.splitlines():
             if line.strip():
-                pay_lines.append(Paragraph(escape(line.strip()), cell_style))
+                pay_block.append(Paragraph(escape(line.strip()), cell_style))
     elif bank:
-        pay_lines = [
-            Paragraph('<font color="#64748b">Bank</font>&nbsp;&nbsp;&nbsp;&nbsp;'
-                      f'<b>{escape(bank.bank_name)}</b>', cell_style),
-            Paragraph('<font color="#64748b">Account name</font>&nbsp;&nbsp;&nbsp;&nbsp;'
-                      f'<b>{escape(bank.name)}</b>', cell_style),
-            Paragraph('<font color="#64748b">Account no</font>&nbsp;&nbsp;&nbsp;&nbsp;'
-                      f'<b>â€¢â€¢â€¢â€¢ {escape(bank.account_number_last4 or "----")}</b>', cell_style),
-        ]
-    pay_block = [Paragraph('PAYMENT DETAILS', label_style), Spacer(1, 1.5 * mm)] + pay_lines
+        pay_rows = Table(
+            [[Paragraph(escape(key), muted_style),
+              Paragraph(escape(value), ParagraphStyle(
+                  'PayValue', parent=cell_style, alignment=2,
+                  fontName='Helvetica-Bold'))]
+             for key, value in (
+                 ('Bank', bank.bank_name),
+                 ('Account name', bank.name),
+                 ('Account no.', f'\u2022\u2022\u2022\u2022 {bank.account_number_last4 or "----"}'))],
+            colWidths=[doc.width * 0.17, doc.width * 0.17])
+        pay_rows.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 1.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        pay_block.append(pay_rows)
+    else:
+        pay_block.append(Paragraph(
+            'Please contact the farm for payment instructions.', muted_style))
 
     # Highlight Total Due with color only; keep its type size and weight aligned
     # with the other summary amounts.
@@ -1458,15 +1681,31 @@ def invoice_pdf_view(request, pk):
                    colWidths=[doc.width * 0.62, doc.width * 0.38])
     bottom.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
     story.append(bottom)
-    story.append(Spacer(1, 9 * mm))
+    story.append(Spacer(1, 4 * mm))
 
-    if invoice.notes:
-        story.append(Paragraph('NOTES & TERMS', label_style))
-        story.append(Spacer(1, 1.5 * mm))
-        for line in invoice.notes.splitlines():
-            if line.strip():
-                story.append(Paragraph(escape(line.strip()), muted_style))
-        story.append(Spacer(1, 12 * mm))
+    cur_label = (getattr(currency_obj, 'name', '') or
+                 getattr(currency_obj, 'code', '') or 'UGX')
+    story.append(Paragraph(
+        f'<font color="#64748b">Amount due in words:</font> '
+        f'{escape(cur_label)} {escape(_amount_in_words(invoice.total))} only.',
+        ParagraphStyle('InWords', parent=cell_style, fontSize=8,
+                       fontName='Helvetica-Oblique')))
+    story.append(Spacer(1, 7 * mm))
+
+    story.append(Paragraph('NOTES & TERMS', label_style))
+    story.append(Spacer(1, 1.5 * mm))
+    note_lines = [line.strip() for line in
+                (invoice.notes or farm.invoice_notes).splitlines() if line.strip()]
+    for line in note_lines or ['Please include the invoice number with your payment.']:
+        story.append(Paragraph(escape(line), muted_style))
+
+    # Fiscal block is drawn by the canvas footer at the bottom-left of the
+    # final page, beside the signature line.
+    ver_code = _fiscal_verification_code(
+        invoice.pk, invoice.number, invoice.total, farm.tax_id)
+    qr_payload = (f'{invoice.number}|{invoice.date}|'
+                  f'{invoice.total} {cur_label}|TIN:{farm.tax_id}|{ver_code}')
+    qr_buf = _qr_png_bytes(qr_payload)
 
     doc.build(story, canvasmaker=LastPageSignatureCanvas)
     resp = HttpResponse(buf.getvalue(), content_type='application/pdf')
@@ -1542,35 +1781,45 @@ def invoice_delete_view(request, pk):
 
 
 
-def _receipt_pdf_response(farm, *, title, amount, amount_caption, rows, filename):
-    """Render a one-page receipt as a downloadable PDF in the invoice style."""
+def _receipt_pdf_response(farm, *, title, receipt_no, payment_date,
+                          received_name, received_lines, pay_description,
+                          pay_sub, pay_date, pay_method, amount,
+                          amount_caption, processed_by, filename,
+                          doc_ref='', meta_lines=()):
+    """Render a one-page payment receipt as a downloadable PDF.
+
+    Layout mirrors the shared receipt design: brand header with an
+    ECG-style accent line, RECEIVED FROM / PAYMENT SUMMARY sections,
+    underlined signature lines, and a footer with farm details + QR +
+    colour bar.
+    """
     from io import BytesIO
     from xml.sax.saxutils import escape
+    from django.utils import timezone
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
     from reportlab.platypus import (
-        HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate, Spacer,
-        Table, TableStyle)
+        HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle)
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
-        topMargin=0, bottomMargin=22 * mm,
-        title=title[0] if isinstance(title, tuple) else title)
+        topMargin=38 * mm, bottomMargin=52 * mm, title=title)
+
     primary = colors.HexColor('#2d6a4f')
     dark = colors.HexColor('#1b4332')
     muted = colors.HexColor('#64748b')
     border = colors.HexColor('#e3ebe6')
     label_style = ParagraphStyle(
-        'SectionLabel', fontName='Helvetica-Bold', fontSize=7.5, leading=10,
+        'SectionLabel', fontName='Helvetica-Bold', fontSize=8, leading=11,
         textColor=primary)
     muted_style = ParagraphStyle(
         'Muted', fontName='Helvetica', fontSize=8, leading=11, textColor=muted)
     cell_style = ParagraphStyle(
         'Cell', fontName='Helvetica', fontSize=8.5, leading=11, textColor=dark)
-    numeric_style = ParagraphStyle('Numeric', parent=cell_style, alignment=2)
 
     currency_obj = getattr(farm, 'default_currency', None)
     symbol = currency_obj.symbol if currency_obj else ''
@@ -1578,102 +1827,194 @@ def _receipt_pdf_response(farm, *, title, amount, amount_caption, rows, filename
     def money(value):
         return f'{symbol} {value:,.2f}'
 
+    contact_parts = ([f'TIN {farm.tax_id}']
+                     if farm and getattr(farm, 'tax_id', '') else [])
+    contact_parts += [p for p in (
+        (farm.location if farm else ''), (farm.phone if farm else ''),
+        (farm.email if farm else '')) if p]
+    contact = ' \u00b7 '.join(contact_parts)
+
+    cur_label = (getattr(currency_obj, 'name', '') or
+                 getattr(currency_obj, 'code', '') or 'UGX')
+
     story = []
-    accent = Table([['']], colWidths=[doc.width], rowHeights=[4 * mm])
-    accent.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), primary)]))
-    story.append(accent)
-    story.append(Spacer(1, 9 * mm))
-
-    if farm and getattr(farm, 'logo', None):
-        try:
-            from PIL import Image as _PILImage
-            with _PILImage.open(farm.logo.path) as pim:
-                lw, lh = pim.size
-            logo_img = RLImage(farm.logo.path, height=14 * mm,
-                               width=14 * mm * (lw / lh) if lh else 14 * mm)
-            logo_img.hAlign = 'LEFT'
-            story.append(logo_img)
-            story.append(Spacer(1, 2 * mm))
-        except Exception:
-            pass
-    contact = ' · '.join(p for p in ((farm.location if farm else ''),
-                            (farm.phone if farm else ''), (farm.email if farm else '')) if p)
-    head_left = [
-        Paragraph(escape(farm.farm_name if farm else 'FarmLedger Pro'), ParagraphStyle(
-            'FarmName', fontName='Helvetica-Bold', fontSize=16, leading=20,
-            textColor=dark)),
-        Paragraph(escape(contact), muted_style),
-    ]
-    title_text, subtitle_text = title
-    head_right = [
-        Paragraph(escape(title_text), ParagraphStyle(
-            'ReceiptTitle', fontName='Helvetica-Bold', fontSize=18, leading=22,
-            alignment=2, textColor=dark)),
-        Paragraph(escape(subtitle_text), ParagraphStyle(
-            'ReceiptSub', fontName='Helvetica-Bold', fontSize=9, leading=12,
-            alignment=2, textColor=primary)),
-    ]
-    head = Table([[head_left, head_right]], colWidths=[doc.width * .58, doc.width * .42])
-    head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
-    story.append(head)
-    story.append(Spacer(1, 4 * mm))
-    story.append(HRFlowable(width='100%', thickness=1.2, color=dark))
+    # The document title + receipt number are rendered in the shared
+    # letterhead band (same as the invoice header).
+    story.append(Paragraph(
+        f'Payment Date: <b>{escape(payment_date)}</b>',
+        ParagraphStyle('PayDate', parent=cell_style, fontSize=8.5,
+                       textColor=muted)))
     story.append(Spacer(1, 8 * mm))
 
-    # Amount box
-    amount_box = Table([
-        [Paragraph(escape(amount_caption), label_style)],
-        [Paragraph(money(amount), ParagraphStyle(
-            'Amount', fontName='Helvetica-Bold', fontSize=21, leading=25,
-            textColor=dark))],
-    ], colWidths=[doc.width])
-    amount_box.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f7faf8')),
-        ('BOX', (0, 0), (-1, -1), 1, border),
-        ('TOPPADDING', (0, 0), (-1, 0), 8),
-        ('BOTTOMPADDING', (0, -1), (-1, -1), 9),
-        ('LEFTPADDING', (0, 0), (-1, -1), 12),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-    ]))
-    story.append(amount_box)
+    # RECEIVED FROM
+    story.append(Paragraph('RECEIVED FROM', label_style))
+    story.append(Spacer(1, 1.5 * mm))
+    story.append(HRFlowable(width='100%', thickness=.6, color=border))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph(escape(received_name or '-'), ParagraphStyle(
+        'RecName', parent=cell_style, fontName='Helvetica-Bold',
+        fontSize=10, leading=13)))
+    for line in received_lines:
+        if line:
+            story.append(Paragraph(escape(line), muted_style))
     story.append(Spacer(1, 8 * mm))
 
-    details = Table(
-        [[Paragraph(escape(key), muted_style),
-          Paragraph(escape(value), numeric_style)] for key, value in rows],
-        colWidths=[doc.width * .52, doc.width * .48])
-    details.setStyle(TableStyle([
-        ('LINEBELOW', (0, 0), (-1, -1), .5, border),
-        ('TEXTCOLOR', (0, 0), (0, -1), muted),
+    # PAYMENT SUMMARY
+    story.append(Paragraph('PAYMENT SUMMARY', label_style))
+    story.append(Spacer(1, 1.5 * mm))
+    story.append(HRFlowable(width='100%', thickness=.6, color=border))
+    story.append(Spacer(1, 3 * mm))
+    head_cell = ParagraphStyle(
+        'HeadCell', parent=cell_style, fontName='Helvetica-Bold',
+        fontSize=8, textColor=colors.white)
+    head_cell_r = ParagraphStyle('HeadCellR', parent=head_cell, alignment=2)
+    pay_table = Table(
+        [[Paragraph('Description', head_cell), Paragraph('Date', head_cell),
+          Paragraph('Method', head_cell), Paragraph('Amount', head_cell_r)],
+         [[Paragraph(escape(pay_description), ParagraphStyle(
+             'PayDesc', parent=cell_style, fontName='Helvetica-Bold',
+             fontSize=8.5)),
+           Paragraph(escape(pay_sub), ParagraphStyle(
+               'PaySub', parent=muted_style, fontSize=7.5))],
+          Paragraph(escape(pay_date), cell_style),
+          Paragraph(escape(pay_method), cell_style),
+          Paragraph(money(amount), ParagraphStyle(
+              'PayAmt', parent=cell_style, alignment=2,
+              fontName='Helvetica-Bold'))]],
+        colWidths=[doc.width * .44, doc.width * .19,
+                   doc.width * .17, doc.width * .20])
+    pay_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary),
+        ('LINEBELOW', (0, 1), (-1, -1), .5, border),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 6),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
     ]))
-    story.append(details)
-
-    story.append(Spacer(1, 14 * mm))
-    sig = Table([
-        ['', '________________________'],
-        ['', Paragraph('Authorized signature', ParagraphStyle(
-            'Sig', parent=muted_style, alignment=2, fontSize=7))],
-    ], colWidths=[doc.width * .58, doc.width * .42])
-    sig.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM')]))
-    story.append(sig)
-    story.append(Spacer(1, 12 * mm))
-    story.append(HRFlowable(width='100%', thickness=.5, color=border))
+    story.append(pay_table)
     story.append(Spacer(1, 3 * mm))
-    story.append(Paragraph('Thank you for your payment.', ParagraphStyle(
-        'Thanks', fontName='Helvetica-Bold', fontSize=9.5, alignment=1,
-        textColor=dark)))
+    story.append(Paragraph(
+        f'<b>{escape(amount_caption)}:</b>&nbsp;&nbsp;&nbsp;'
+        f'<b>{money(amount)}</b>',
+        ParagraphStyle('TotalPaid', parent=cell_style, alignment=2,
+                       fontSize=10, leading=13)))
+    for line in meta_lines:
+        story.append(Paragraph(escape(line), ParagraphStyle(
+            'MetaLine', parent=muted_style, fontSize=7.5, alignment=2)))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        f'<font color="#64748b">Amount in words:</font> '
+        f'{escape(cur_label)} {escape(_amount_in_words(amount))} only.',
+        ParagraphStyle('InWords', parent=cell_style, fontSize=8,
+                       fontName='Helvetica-Oblique')))
+    story.append(Spacer(1, 16 * mm))
 
-    doc.build(story)
+    # Underlined signature lines
+    sig = Table(
+        [[Paragraph(f'Processed By: {escape(processed_by)}', ParagraphStyle(
+            'SigL', parent=muted_style, alignment=1, fontSize=8)),
+          Paragraph('Customer Signature', ParagraphStyle(
+              'SigR', parent=muted_style, alignment=1, fontSize=8))]],
+        colWidths=[doc.width * .5, doc.width * .5])
+    sig.setStyle(TableStyle([
+        ('LINEABOVE', (0, 0), (0, 0), .9, dark),
+        ('LINEABOVE', (1, 0), (1, 0), .9, dark),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (0, 0), 0),
+        ('LEFTPADDING', (1, 0), (1, 0), 18),
+        ('RIGHTPADDING', (1, 0), (1, 0), 0),
+        ('RIGHTPADDING', (0, 0), (0, 0), 18),
+    ]))
+    story.append(sig)
+
+    # Footer content is drawn on the canvas at fixed positions.
+    ver_code = _fiscal_verification_code(
+        doc_ref or filename, amount,
+        getattr(farm, 'tax_id', '') if farm else '')
+    qr_payload = (f'{doc_ref or filename}|{amount} {cur_label}|'
+                  f'TIN:{getattr(farm, "tax_id", "") if farm else ""}|{ver_code}')
+    qr_buf = _qr_png_bytes(qr_payload)
+    printed_on = timezone.localtime().strftime('%d %b %Y, %I:%M %p')
+
+    class ReceiptCanvas(canvas.Canvas):
+        """Header (page 1) and footer (last page) drawn at fixed positions."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            saved = self._saved_page_states
+            page_count = len(saved)
+            for state in saved:
+                self.__dict__.update(state)
+                if self._pageNumber == 1:
+                    self._draw_header()
+                if self._pageNumber == page_count:
+                    self._draw_footer()
+                canvas.Canvas.showPage(self)
+            canvas.Canvas.save(self)
+
+        def _draw_header(self):
+            _draw_fiscal_band(
+                self, A4[0], A4[1],
+                farm_name=farm.farm_name if farm else 'FarmLedger Pro',
+                tagline=farm.tagline if farm else '',
+                contact=contact, title=title,
+                subtitle=f'No. {receipt_no}',
+                logo_path=farm.logo.path
+                          if farm and getattr(farm, 'logo', None) else None)
+
+        def _draw_footer(self):
+            from reportlab.lib.utils import ImageReader
+            page_width, _ = A4
+            left = 18 * mm
+            right = page_width - 18 * mm
+
+            self.setStrokeColor(border)
+            self.setLineWidth(.7)
+            self.line(left, 45 * mm, right, 45 * mm)
+
+            self.setFillColor(primary)
+            self.setFont('Helvetica-Bold', 8.5)
+            self.drawString(
+                left, 40 * mm,
+                farm.farm_name if farm else 'FarmLedger Pro')
+            self.setFillColor(muted)
+            self.setFont('Helvetica', 6.8)
+            self.drawString(left, 35.5 * mm, contact)
+            self.drawString(
+                left, 31 * mm,
+                f'Printed: {printed_on}   |   Receipt No: {receipt_no}   |'
+                f'   Verification: {ver_code}')
+
+            qr_size = 19 * mm
+            self.drawImage(ImageReader(qr_buf), right - qr_size, 18 * mm,
+                           width=qr_size, height=qr_size, mask='auto')
+            self.setFont('Helvetica', 6)
+            self.drawCentredString(right - qr_size / 2, 14.5 * mm,
+                                   'Scan to view receipt')
+
+            self.setFillColor(primary)
+            self.rect(0, 0, page_width, 7 * mm, stroke=0, fill=1)
+            self.setFillColor(colors.white)
+            self.setFont('Helvetica', 6.5)
+            self.drawCentredString(
+                page_width / 2, 2.6 * mm,
+                farm.tagline if farm and farm.tagline
+                else 'Generated by FarmLedger Pro')
+
+    doc.build(story, canvasmaker=ReceiptCanvas)
     response = HttpResponse(buf.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
 @login_required
 def invoice_payment_receipt_view(request, pk, payment_pk):
     invoice = get_object_or_404(
@@ -1681,23 +2022,34 @@ def invoice_payment_receipt_view(request, pk, payment_pk):
                         Invoice.objects.select_related('farm_profile__default_currency')),
         pk=pk)
     payment = get_object_or_404(InvoicePayment, pk=payment_pk, invoice=invoice)
-    title = (
-        'PAYMENT RECEIPT',
-        f'Receipt RCP-{payment.pk:05d} - Invoice {invoice.number}')
-    rows = [
-        ('Received from', invoice.buyer or invoice.customer.name if invoice.customer else '-'),
-        ('Date received', payment.date.strftime('%d / %m / %Y')),
-        ('Payment method', payment.get_method_display()),
-        ('Reference', payment.reference or '-'),
-        ('Invoice total', f'{invoice.total:,.2f}'),
-        ('Balance after payment', f'{invoice.balance:,.2f}'),
-    ]
-    if payment.notes:
-        rows.append(('Notes', payment.notes))
+    customer = invoice.customer
     barcode_value = f'RCP-{payment.pk:05d}'
+    meta = [f'Invoice total {invoice.total:,.2f}    '
+            f'Balance after payment {invoice.balance:,.2f}']
+    if payment.reference:
+        meta.append(f'Payment reference: {payment.reference}')
+    if payment.notes:
+        meta.append(f'Notes: {payment.notes}')
     return _receipt_pdf_response(
-        invoice.farm_profile, title=title, amount=payment.amount,
-        amount_caption='Amount received', rows=rows, filename=f'{barcode_value}.pdf')
+        invoice.farm_profile,
+        title='PAYMENT RECEIPT',
+        receipt_no=barcode_value,
+        payment_date=payment.date.strftime('%B %d, %Y'),
+        received_name=invoice.buyer or (customer.name if customer else '-'),
+        received_lines=[f'Invoice: {invoice.number}'] + [
+            line for line in (
+                customer.phone if customer else '',
+                customer.email if customer else '') if line],
+        pay_description=f'Payment Receipt {barcode_value}',
+        pay_sub=f'Invoice: {invoice.number}',
+        pay_date=payment.date.strftime('%b %d, %Y'),
+        pay_method=payment.get_method_display(),
+        amount=payment.amount,
+        amount_caption='Total paid',
+        processed_by=request.user.get_full_name() or request.user.username,
+        filename=f'{barcode_value}.pdf',
+        doc_ref=barcode_value,
+        meta_lines=meta)
 
 
 @login_required
@@ -1722,19 +2074,29 @@ def sale_receipt_view(request, pk):
         sale_desc = sale.inventory_item.name
     else:
         sale_desc = 'Produce'
-    rows = [
-        ('Sold to', sale.buyer or '-'),
-        ('Item', sale_desc),
-        ('Quantity', f'{sale.quantity:,.2f} {sale.unit}'),
-        ('Unit price', f'{sale.unit_price:,.2f}'),
-        ('Payment method', sale.get_payment_method_display()),
-        ('Sale total', f'{sale.total_amount:,.2f}'),
-        ('Balance outstanding', f'{sale.receivable:,.2f}'),
-    ]
     return _receipt_pdf_response(
-        farm, title=('SALE RECEIPT', f'Receipt SLC-{sale.pk:05d} - {sale.sale_date.strftime("%d / %m / %Y")}'),
-        amount=sale.amount_received, amount_caption='Amount received',
-        rows=rows, filename=f'sale-receipt-{sale.pk:05d}.pdf')
+        farm,
+        title='SALE RECEIPT',
+        receipt_no=f'SLC-{sale.pk:05d}',
+        payment_date=sale.sale_date.strftime('%B %d, %Y'),
+        received_name=sale.buyer or '-',
+        received_lines=[f'Sale #{sale.pk}'] + [
+            line for line in (
+                sale.customer.phone if sale.customer else '',
+                sale.customer.email if sale.customer else '') if line],
+        pay_description=f'Sale Receipt SLC-{sale.pk:05d}',
+        pay_sub=sale_desc,
+        pay_date=sale.sale_date.strftime('%b %d, %Y'),
+        pay_method=sale.get_payment_method_display(),
+        amount=sale.amount_received,
+        amount_caption='Total paid',
+        processed_by=request.user.get_full_name() or request.user.username,
+        filename=f'sale-receipt-{sale.pk:05d}.pdf',
+        doc_ref=f'SLC-{sale.pk:05d}',
+        meta_lines=[
+            f'{sale.quantity:,.2f} {sale.unit} @ {sale.unit_price:,.2f}    '
+            f'Sale total {sale.total_amount:,.2f}    '
+            f'Balance outstanding {sale.receivable:,.2f}'])
 
 
 @login_required

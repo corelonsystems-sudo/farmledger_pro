@@ -4057,7 +4057,8 @@ def _export_letterhead(request, farm=None):
             logo_path = farm.logo.path
         except (ValueError, OSError):
             logo_path = None
-    return name, contact, logo_path
+    tagline = getattr(farm, 'tagline', '') or '' if farm else ''
+    return name, contact, logo_path, tagline
 
 
 def _export_report(request, fmt, title, filename, sections, date_from, date_to, farm=None):
@@ -4075,7 +4076,8 @@ def _export_report(request, fmt, title, filename, sections, date_from, date_to, 
     except (TypeError, ValueError):
         rate = 1.0
     period = f'{date_from or "Start"} to {date_to or "Today"}'
-    farm_name, farm_contact, farm_logo = _export_letterhead(request, farm=farm)
+    farm_name, farm_contact, farm_logo, farm_tagline = _export_letterhead(
+        request, farm=farm)
     generated = f'{datetime.date.today():%d %b %Y}'
 
     def num_val(cell):
@@ -4277,50 +4279,32 @@ def _export_report(request, fmt, title, filename, sections, date_from, date_to, 
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate,
-        Spacer, Table, TableStyle)
+        Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle)
+    from crops.views import FISCAL_BAND_HEIGHT_MM, _draw_fiscal_band
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=landscape(A4), leftMargin=12 * mm, rightMargin=12 * mm,
-        topMargin=12 * mm, bottomMargin=12 * mm, title=title)
+        topMargin=(FISCAL_BAND_HEIGHT_MM + 8) * mm, bottomMargin=12 * mm,
+        title=title)
     styles = getSampleStyleSheet()
-    farm_style = ParagraphStyle(
-        'FarmName', fontName='Helvetica-Bold', fontSize=19,
-        textColor=colors.HexColor('#1b4332'), alignment=1, spaceAfter=2)
-    contact_style = ParagraphStyle(
-        'FarmContact', fontName='Helvetica', fontSize=8.5,
-        textColor=colors.HexColor('#595959'), alignment=1)
     meta_style = ParagraphStyle(
         'ReportMeta', fontName='Helvetica-Oblique', fontSize=8.5,
         textColor=colors.HexColor('#595959'), alignment=1)
-    title_style = ParagraphStyle(
-        'ReportTitle', fontName='Helvetica-Bold', fontSize=14,
-        textColor=colors.HexColor('#1b4332'), alignment=1, spaceBefore=2)
 
-    story = []
-    if farm_logo:
-        try:
-            from PIL import Image as _PILImage
-            with _PILImage.open(farm_logo) as pim:
-                lw, lh = pim.size
-            logo_img = RLImage(farm_logo, height=13 * mm,
-                               width=13 * mm * (lw / lh) if lh else 13 * mm)
-            logo_img.hAlign = 'CENTER'
-            story.append(logo_img)
-            story.append(Spacer(1, 1.5 * mm))
-        except Exception:
-            pass
-    story += [
-        Paragraph(escape(farm_name.upper()), farm_style),
-        Paragraph(escape(farm_contact or 'Farm management & reporting'), contact_style),
-        Spacer(1, 2.5 * mm),
-        HRFlowable(width='100%', thickness=1.1, color=colors.HexColor('#1b4332')),
-        Spacer(1, 3 * mm),
-        Paragraph(escape(title), title_style),
+    def draw_band(c, _doc):
+        _draw_fiscal_band(
+            c, doc.pagesize[0], doc.pagesize[1], farm_name=farm_name,
+            tagline=farm_tagline, contact=farm_contact,
+            title=title.upper(), subtitle=f'Period: {period}',
+            logo_path=farm_logo)
+
+    # The letterhead band (logo, farm identity, report title) is drawn on the
+    # canvas — identical to the invoice/receipt header.
+    story = [
         Paragraph(
-            f'Period: {period} &nbsp;·&nbsp; Currency: {code} &nbsp;·&nbsp; Generated: {generated}',
+            f'Currency: {code} &nbsp;·&nbsp; Generated: {generated}',
             meta_style),
-        Spacer(1, 5 * mm),
+        Spacer(1, 3 * mm),
     ]
     cell_style = ParagraphStyle('ExportCell', fontName='Helvetica', fontSize=7.5, leading=9)
     header_style = ParagraphStyle('ExportHeader', parent=cell_style, textColor=colors.white, fontName='Helvetica-Bold')
@@ -4356,7 +4340,7 @@ def _export_report(request, fmt, title, filename, sections, date_from, date_to, 
         ]))
         story.append(t)
         story.append(Spacer(1, 6 * mm))
-    doc.build(story)
+    doc.build(story, onFirstPage=draw_band)
     resp = HttpResponse(buf.getvalue(), content_type='application/pdf')
     resp['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
     return resp

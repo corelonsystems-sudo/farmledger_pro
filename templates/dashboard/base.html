@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,6 +46,9 @@
             text-decoration: none; color: white;
         }
         .brand svg { width: 24px; height: 24px; }
+        .brand .brand-logo, .brand .brand-logo-default {
+            width: 28px; height: 28px; object-fit: contain; flex: none;
+        }
         .user-card {
             background: rgba(255,255,255,0.1);
             border-radius: 8px; padding: 12px;
@@ -277,14 +281,19 @@
     {% block sidebar %}
     <aside class="sidebar">
         <a class="brand" href="/">
-            <svg viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            {% if system_logo_url %}
+            <img class="brand-logo" src="{{ system_logo_url }}" alt="">
+            {% else %}
+            <img class="brand-logo-default" src="{% static 'system-logo.png' %}" alt="">
+            {% endif %}
             FarmLedger Pro
         </a>
-        <div class="user-card">
+        <hr>
+        <!-- <div class="user-card">
             <div class="user-avatar">{{ request.user.username|first|upper|default:"A" }}</div>
             <p><strong>{{ request.user.username|default:"Admin User" }}</strong></p>
             <p class="role">{% if request.user.is_superuser %}Administrator{% else %}{{ request.user.get_role_display }}{% endif %}</p>
-        </div>
+        </div> -->
         <ul class="nav">
             <li><a href="/" class="{% block nav_dashboard %}{% endblock %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> Dashboard</a></li>
 
