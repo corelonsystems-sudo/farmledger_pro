@@ -3823,6 +3823,7 @@ def database_import(request):
         import os
         import shutil
         import sqlite3
+        import time
         db_path = _sqlite_db_path()
         if db_path is None:
             messages.error(request, 'Database file import requires the SQLite backend.')
@@ -3874,11 +3875,39 @@ def database_import(request):
                     # would break the TestCase's atomic block).
                     if not connections['default'].in_atomic_block:
                         connections.close_all()
-                    for side in (f'{db_path}-wal', f'{db_path}-shm'):
-                        Path(side).unlink(missing_ok=True)
-                    os.replace(tmp, db_path)
+                    # Copy the upload into the live file via SQLite's backup
+                    # API. os.replace() cannot rename over db.sqlite3 while
+                    # any process holds it open (always the case on Windows
+                    # with the dev server running); backup() writes pages in
+                    # place so no rename is needed.
+                    src = sqlite3.connect(str(tmp))
+                    try:
+                        dst = sqlite3.connect(str(db_path))
+                        try:
+                            last_exc = None
+                            for _attempt in range(8):
+                                try:
+                                    src.backup(dst)
+                                    last_exc = None
+                                    break
+                                except sqlite3.OperationalError as exc:
+                                    last_exc = exc
+                                    time.sleep(.4)
+                            if last_exc:
+                                raise last_exc
+                        finally:
+                            dst.close()
+                    finally:
+                        src.close()
+                    tmp.unlink(missing_ok=True)
             except (OSError, sqlite3.Error) as exc:
-                error = f'The database file could not be imported: {exc}'
+                if getattr(exc, 'winerror', None) == 5 or 'locked' in str(exc):
+                    error = ('The database file could not be imported: '
+                             'db.sqlite3 is locked by another process. Close '
+                             'any other dev server, shell or SQLite tool that '
+                             'has the database open and try again.')
+                else:
+                    error = f'The database file could not be imported: {exc}'
             if error:
                 tmp.unlink(missing_ok=True)
                 messages.error(request, error)

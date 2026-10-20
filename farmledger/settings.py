@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-farmledger-pro-dev-key-change-in-production'
 DEBUG = True
-ALLOWED_HOSTS = ['*', '172.16.61.28', '192.168.100.179','10.74.86.138', '172.23.89.138']
+ALLOWED_HOSTS = ['*', '172.16.61.26', '192.168.100.179','10.74.86.138', '172.23.89.138']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
