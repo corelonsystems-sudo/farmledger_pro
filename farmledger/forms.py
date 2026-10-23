@@ -155,13 +155,14 @@ class CropForm(forms.ModelForm):
 class CropSeasonForm(forms.ModelForm):
     class Meta:
         model = CropSeason
-        fields = ['field', 'crop', 'variety', 'planting_date', 'expected_yield',
-                  'expected_harvest_date',
+        fields = ['field', 'crop', 'variety', 'planting_date', 'plants_count',
+                  'expected_yield', 'expected_harvest_date',
                   'actual_harvest_date', 'status', 'is_perennial_season', 'season_label',
                   'perennial_established_date', 'notes']
         widgets = {
             'variety': forms.TextInput(attrs={'placeholder': 'e.g. Pioneer P1197AM'}),
             'planting_date': forms.DateInput(attrs={'type': 'date'}),
+            'plants_count': forms.NumberInput(attrs={'min': '0', 'placeholder': 'e.g. 5000'}),
             'expected_yield': forms.NumberInput(attrs={'step': '0.01', 'placeholder': 'e.g. 2500 kg'}),
             'expected_harvest_date': forms.DateInput(attrs={'type': 'date'}),
             'actual_harvest_date': forms.DateInput(attrs={'type': 'date'}),
@@ -171,6 +172,7 @@ class CropSeasonForm(forms.ModelForm):
         }
         labels = {
             'is_perennial_season': 'Perennial harvest cycle (e.g. coffee/tea harvest season)',
+            'plants_count': 'Plants/trees planted on field',
         }
 
 

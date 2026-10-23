@@ -1,0 +1,93 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Register Animal - FarmLedger Pro{% endblock %}
+{% block nav_animal_records %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ list_url }}">Animal Records</a> &rsaquo; Register Animal{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; }
+    .budget-avatar svg { width:34px; height:34px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 0; color:#dcece2; font-size:.83rem; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .reg-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .reg-card { background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .reg-card.wide { grid-column:1 / -1; }
+    .reg-card h3 { margin:0 0 14px; color:#1b4332; font-size:.9rem; }
+    .reg-fields { display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
+    .reg-fields .full { grid-column:1 / -1; }
+    .form-group { margin-bottom:10px; }
+    .form-group label { display:block; font-weight:600; font-size:.74rem; margin-bottom:4px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+    .form-group input, .form-group select, .form-group textarea { width:100%; padding:8px 11px; border:1px solid var(--border); border-radius:6px; font-size:.84rem; font-family:inherit; background:#fff; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(45,106,79,.12); }
+    .form-group .help { font-size:.68rem; color:var(--text-muted); margin-top:3px; }
+    .form-group ul.errorlist { list-style:none; padding:0; margin:3px 0 0; }
+    .form-group ul.errorlist li { font-size:.72rem; color:var(--red); }
+    .reg-errors { background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px 14px; margin-bottom:16px; font-size:.8rem; color:var(--red); }
+    .reg-errors ul { list-style:none; margin:0; padding:0; }
+    .reg-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; padding-top:16px; border-top:1px solid var(--border); }
+    @media(max-width:900px) { .reg-grid { grid-template-columns:1fr; } .budget-toolbar { flex-direction:column; align-items:flex-start; gap:14px; } .budget-back { text-align:left; } }
+    @media(max-width:560px) { .reg-fields { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="reg-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 7h.01M3.4 18H12a8 8 0 008-8V7a4 4 0 00-7.28-2.3L2 20"/><path d="m20 7 2 .5-2 .5"/><path d="M10 18v3"/><path d="M14 17.75V21"/><path d="M7 18a6 6 0 00.84-3.09"/></svg></div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Animal Records</p>
+            <h1 id="reg-page-title">Register Animal</h1>
+            <p class="budget-header-subtitle">Add an individually tracked animal to the herd register.</p>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ list_url }}">&larr; Back to Animal Records</a>
+        <a class="btn btn-secondary" href="{{ list_url }}">Cancel</a>
+    </div>
+</header>
+
+<div class="budget-paper">
+    {% if form.non_field_errors %}
+    <div class="reg-errors"><ul>{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+        <div class="reg-grid">
+            {% for title, fields in sections %}
+            {% if fields %}
+            <section class="reg-card{% if fields|length == 1 %} wide{% endif %}">
+                <h3>{{ title }}</h3>
+                <div class="reg-fields">
+                    {% for field in fields %}
+                    <div class="form-group{% if field.name == 'notes' %} full{% endif %}">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} *{% endif %}</label>
+                        {{ field }}
+                        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+                        {% if field.errors %}<ul class="errorlist">{% for e in field.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <div class="reg-actions">
+            <a class="btn btn-secondary" href="{{ list_url }}">Cancel</a>
+            <button type="submit" class="btn btn-primary">Register Animal</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

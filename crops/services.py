@@ -88,6 +88,61 @@ def sync_sale_income(sale):
             income.save(update_fields=[*synced.keys(), 'updated_at'])
 
 
+INVOICE_PAYMENT_METHOD_MAP = {
+    'CASH': 'CASH',
+    'BANK': 'BANK_TRANSFER',
+    'MOBILE': 'CARD',
+    'CHEQUE': 'CHECK',
+    'OTHER': 'OTHER',
+}
+
+
+def sync_invoice_payment_income(payment):
+    """Keep exactly one auto-generated Income per invoice payment.
+
+    Payments on sale-linked invoices are skipped: the sale's own income
+    record (``Income.sale``) already covers that revenue, so booking it
+    again here would double-count. Payment deletion removes the income
+    via ``on_delete=CASCADE``.
+    """
+    from income.models import Income, IncomeSource
+
+    invoice = payment.invoice
+    if invoice.sale_id or invoice.farm_profile is None:
+        return
+    source, _ = IncomeSource.objects.get_or_create(
+        name='Invoice Payments',
+        defaults={
+            'code': 'INV',
+            'schedule_f_line': 'part1_sales',
+            'description': 'Payments received on invoices',
+        },
+    )
+    synced = {
+        'farm_profile': invoice.farm_profile,
+        'source': source,
+        'amount': payment.amount,
+        'date': payment.date,
+        'customer': (invoice.buyer
+                     or (invoice.customer.name if invoice.customer_id else '')),
+        'customer_ref': invoice.customer,
+        'payment_method': INVOICE_PAYMENT_METHOD_MAP.get(
+            payment.method, 'OTHER'),
+    }
+    with transaction.atomic():
+        income = Income.objects.filter(invoice_payment=payment).first()
+        if income is None:
+            Income.objects.create(
+                invoice_payment=payment,
+                notes=f'Auto-generated from invoice {invoice.number} payment.',
+                **synced,
+            )
+        else:
+            for attr, value in synced.items():
+                setattr(income, attr, value)
+            income.save(update_fields=[*synced.keys(), 'updated_at'])
+
+
 def sync_processing_expense(stage):
     """Keep exactly one auto-generated Expense per processing stage cost.
 

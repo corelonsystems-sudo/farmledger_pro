@@ -25,6 +25,7 @@ from crops.views import (
     waste_detail_view, customer_detail_view, sale_record_payment_view,
     invoice_list_view, invoice_form_view, invoice_detail_view, invoice_pdf_view,
     invoice_record_payment_view, invoice_delete_view, invoice_payment_receipt_view,
+    invoice_convert_view,
     sale_receipt_view, sale_generate_invoice_view,
 )
 from income.views import income_source_detail_view
@@ -34,7 +35,7 @@ from .views import (
     field_detail_view, landparcel_detail_view, equipment_detail_view,
     inventory_item_detail_view, worker_detail_view, task_detail_view,
     task_advance_view, payroll_run_detail_view, payroll_generate_view,
-    payroll_complete_view, animal_record_detail_view,
+    payroll_complete_view, animal_record_detail_view, animal_register_view,
     database_export, database_import,
 )
 
@@ -112,6 +113,7 @@ urlpatterns = [
     path('invoices/<int:pk>/edit/', invoice_form_view, name='invoice_edit'),
     path('invoices/<int:pk>/payment/', invoice_record_payment_view, name='invoice_record_payment'),
     path('invoices/<int:pk>/delete/', invoice_delete_view, name='invoice_delete'),
+    path('invoices/<int:pk>/convert/', invoice_convert_view, name='invoice_convert'),
     path('invoices/<int:pk>/pdf/', invoice_pdf_view, name='invoice_pdf'),
     path('invoices/<int:pk>/receipts/<int:payment_pk>/', invoice_payment_receipt_view, name='invoice_payment_receipt'),
     path('fields/<int:pk>/', field_detail_view, name='field_detail'),
@@ -124,6 +126,7 @@ urlpatterns = [
     path('payroll/<int:pk>/', payroll_run_detail_view, name='payrollrun_detail'),
     path('payroll/<int:pk>/generate/', payroll_generate_view, name='payroll_generate'),
     path('payroll/<int:pk>/complete/', payroll_complete_view, name='payroll_complete'),
+    path('animals/new/', animal_register_view, name='animal_register'),
     path('animals/<int:pk>/', animal_record_detail_view, name='animalrecord_detail'),
     path('customers/<int:pk>/', customer_detail_view, name='customer_detail'),
     path('waste/<int:pk>/', waste_detail_view, name='waste_detail'),

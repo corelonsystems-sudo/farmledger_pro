@@ -1655,7 +1655,8 @@ def _q_filter(*fields):
 
 def _section_list(request, app, model, *, queryset, title, subtitle, nav,
                   columns, row_fn, filter_specs=(), stats_fn=None,
-                  create_label='Add Record', table_title=None, section='Animals'):
+                  create_label='Add Record', table_title=None, section='Animals',
+                  template='dashboard/section_list.html', extra_fn=None):
     """Render a KPI + filter + table list page on dashboard/section_list.html."""
     filters = []
     for spec in filter_specs:
@@ -1666,6 +1667,10 @@ def _section_list(request, app, model, *, queryset, title, subtitle, nav,
         queryset = spec['apply'](queryset, spec['value'])
         filters.append(spec)
     stats = stats_fn(queryset) if stats_fn else []
+    if extra_fn:
+        stats_extra = extra_fn(queryset)
+    else:
+        stats_extra = {}
     paginator = Paginator(queryset, 25)
     page_obj = paginator.get_page(request.GET.get('page', 1))
     qp = request.GET.copy()
@@ -1687,7 +1692,8 @@ def _section_list(request, app, model, *, queryset, title, subtitle, nav,
         'table_title': table_title or title, 'section': section,
         'can_write': _can_write(request.user, label),
     }
-    return render(request, 'dashboard/section_list.html', context)
+    context.update(stats_extra)
+    return render(request, template, context)
 
 
 def _animal_species_list(request, app, model):
@@ -1804,12 +1810,53 @@ def _animal_record_list(request, app, model):
             'health': _status_pill(a.health_status, a.get_health_status_display()),
             'sold': _pill('Sold', 'blue') if a.is_sold else _pill('On farm', 'green'),
         }
+    def stats_extra(fqs):
+        total = fqs.count()
+        species_rows = [
+            {'label': r['species__name'] or 'Unspecified', 'total': r['n']}
+            for r in fqs.values('species__name').annotate(n=Count('pk')).order_by('-n')
+        ]
+        species_donut = _donut_segments(species_rows, limit=5)
+        gender_rows = []
+        for value, label, color in (
+                ('M', 'Male', '#3b82f6'), ('F', 'Female', '#e9a226'),
+                ('C', 'Castrated', '#6b7a8d')):
+            n = fqs.filter(gender=value).count()
+            if n:
+                gender_rows.append({
+                    'label': label, 'count': n, 'color': color,
+                    'pct': round(n / total * 100) if total else 0})
+        health_rows = []
+        for value, label in AnimalRecord.HealthStatus.choices:
+            n = fqs.filter(health_status=value).count()
+            if n:
+                health_rows.append({
+                    'label': label, 'count': n,
+                    'pill': _LIVESTOCK_PILL.get(value, 'slate'),
+                    'pct': round(n / total * 100) if total else 0})
+        on_farm = fqs.filter(is_sold=False)
+        agg = fqs.aggregate(
+            herd=Coalesce(Sum('acquisition_cost', filter=Q(is_sold=False)), 0, output_field=DecimalField()),
+            revenue=Coalesce(Sum('sale_price', filter=Q(is_sold=True)), 0, output_field=DecimalField()),
+            avg_weight=Avg('current_weight_kg', filter=Q(is_sold=False, current_weight_kg__gt=0)),
+        )
+        return {
+            'anm_species_donut': species_donut,
+            'anm_species_total': total,
+            'anm_gender_rows': gender_rows,
+            'anm_health_rows': health_rows,
+            'anm_herd_value': agg['herd'],
+            'anm_sale_revenue': agg['revenue'],
+            'anm_avg_weight': agg['avg_weight'],
+        }
     return _section_list(
         request, app, model, queryset=qs.order_by('tag_number'),
         title='Animal Records', table_title='Individual Animals',
         subtitle='Individually tracked animals — tags, weights, health, and sales.',
         nav='animalrecord', columns=columns, row_fn=row,
         create_label='Add Animal',
+        template='livestock/animal_directory.html',
+        extra_fn=stats_extra,
         filter_specs=[
             _f('q', 'Search', _q_filter('tag_number', 'name', 'species__name'),
                placeholder='Tag or name...'),
@@ -2853,112 +2900,146 @@ def field_detail_view(request, pk):
     from equipment.models import EquipmentUsage
     from fields.models import Field
     obj = get_object_or_404(
-        scoped_queryset(Field, request.user).prefetch_related('parcels'), pk=pk)
-    seasons = scoped_queryset(CropSeason, request.user).select_related('crop').filter(field=obj).order_by('-planting_date')[:10]
+        scoped_queryset(Field, request.user).select_related('farm_profile').prefetch_related('parcels'), pk=pk)
+    seasons_qs = scoped_queryset(CropSeason, request.user).select_related('crop').filter(field=obj).order_by('-planting_date')
+    seasons = seasons_qs.annotate(
+        season_harvested=Coalesce(Sum('harvests__quantity'), 0, output_field=DecimalField()),
+    )[:10]
     usage = scoped_queryset(EquipmentUsage, request.user).select_related('equipment').filter(field=obj).order_by('-date')[:10]
     parcels = list(obj.parcels.all())
     crop_stats = list(
-        scoped_queryset(CropSeason, request.user).filter(field=obj)
+        seasons_qs
         .values('crop_id', 'crop__name', 'crop__default_unit')
         .annotate(
             season_count=Count('pk'),
             harvest_count=Count('harvests', distinct=True),
             total_harvested=Coalesce(Sum('harvests__quantity'), 0, output_field=DecimalField()),
+            total_plants=Coalesce(Sum('plants_count'), 0),
         ).order_by('-season_count', 'crop__name'))
-    info_groups = [{
-        'title': 'Field',
-        'rows': [
-            {'label': 'Acreage', 'value': f'{obj.acreage} ac'},
-            {'label': 'Soil Type', 'value': obj.get_soil_type_display()},
-            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
-             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
-            {'label': 'Parcels', 'value': len(parcels)},
+    active_season = seasons_qs.filter(
+        status__in=[
+            CropSeason.Status.PLANTED, CropSeason.Status.GROWING,
+            CropSeason.Status.FLOWERING,
+        ]).first()
+    next_season = active_season or seasons_qs.filter(status=CropSeason.Status.PLANNED).first()
+    parcels_table = {
+        'title': 'Land Parcels',
+        'columns': [
+            {'key': 'type', 'label': 'Tenure'},
+            {'key': 'cost', 'label': 'Lease Cost', 'class': 'num'},
+            {'key': 'start', 'label': 'Start'},
+            {'key': 'end', 'label': 'End'},
+            {'key': 'owner', 'label': 'Landowner'},
         ],
-    }]
-    tables = [
-        {
-            'title': 'Land Parcels',
-            'columns': [
-                {'key': 'type', 'label': 'Tenure'},
-                {'key': 'cost', 'label': 'Lease Cost', 'class': 'num'},
-                {'key': 'start', 'label': 'Start'},
-                {'key': 'end', 'label': 'End'},
-                {'key': 'owner', 'label': 'Landowner'},
-            ],
-            'rows': _table_rows(parcels, lambda p: {
-                'type': _pill(p.get_land_type_display(), 'teal' if p.land_type == 'OWNED' else 'amber'),
-                'cost': _money(p.lease_cost), 'start': p.lease_start,
-                'end': p.lease_end, 'owner': p.owner_name,
-                'view_url': reverse('landparcel_detail', args=[p.pk]),
-            }),
-            'has_actions': True,
-            'list_url': reverse('model_list', args=['fields', 'landparcel']),
-            'empty': 'No parcels on this field.',
-        },
-        {
-            'title': 'Crops Grown',
-            'columns': [
-                {'key': 'crop', 'label': 'Crop'},
-                {'key': 'seasons', 'label': 'Seasons', 'class': 'num'},
-                {'key': 'harvests', 'label': 'Harvests', 'class': 'num'},
-                {'key': 'yield', 'label': 'Total Harvested', 'class': 'num'},
-            ],
-            'rows': [
-                {
-                    'pk': c['crop_id'],
-                    'crop': _main(c['crop__name'] or 'Unspecified crop'),
-                    'seasons': c['season_count'],
-                    'harvests': c['harvest_count'],
-                    'yield': f"{c['total_harvested']} {c['crop__default_unit'] or ''}".strip(),
-                    'view_url': reverse('crop_detail', args=[c['crop_id']]) if c['crop_id'] else '',
-                } for c in crop_stats
-            ],
-            'has_actions': True,
-            'empty': 'No crops planted on this field.',
-        },
-        {
-            'title': 'Crop Seasons',
-            'columns': [
-                {'key': 'crop', 'label': 'Crop'},
-                {'key': 'planted', 'label': 'Planted'},
-                {'key': 'status', 'label': 'Status'},
-            ],
-            'rows': _table_rows(seasons, lambda s: {
-                'crop': _main(s.crop.name, f'Expected: {s.expected_yield}' if s.expected_yield else ''),
-                'planted': s.planting_date,
-                'status': _status_pill(s.status, s.get_status_display()),
-                'view_url': reverse('crop_season_detail', args=[s.pk]),
-            }),
-            'has_actions': True,
-            'list_url': reverse('model_list', args=['crops', 'cropseason']),
-            'empty': 'No crop seasons on this field.',
-        },
-        {
-            'title': 'Equipment Usage',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'equipment', 'label': 'Equipment'},
-                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
-                {'key': 'description', 'label': 'Work'},
-            ],
-            'rows': _table_rows(usage, lambda u: {
-                'date': u.date, 'equipment': u.equipment.name,
-                'hours': f'{u.hours}h', 'description': u.description[:60],
-            }),
-            'empty': 'No equipment logged on this field.',
-        },
-    ]
-    return _record_detail(
-        request, 'fields', 'field', obj, title=obj.name,
-        subtitle=f'{obj.farm_profile.farm_name} field', nav='field',
-        stats=[
+        'rows': _table_rows(parcels, lambda p: {
+            'type': _pill(p.get_land_type_display(), 'teal' if p.land_type == 'OWNED' else 'amber'),
+            'cost': _money(p.lease_cost), 'start': p.lease_start,
+            'end': p.lease_end, 'owner': p.owner_name,
+            'view_url': reverse('landparcel_detail', args=[p.pk]),
+        }),
+        'has_actions': True,
+        'list_url': reverse('model_list', args=['fields', 'landparcel']),
+        'empty': 'No parcels on this field.',
+    }
+    crops_table = {
+        'title': 'Crops Grown',
+        'columns': [
+            {'key': 'crop', 'label': 'Crop'},
+            {'key': 'seasons', 'label': 'Seasons', 'class': 'num'},
+            {'key': 'plants', 'label': 'Plants', 'class': 'num'},
+            {'key': 'per_plant', 'label': 'Harvest/Plant', 'class': 'num'},
+            {'key': 'harvests', 'label': 'Harvests', 'class': 'num'},
+            {'key': 'yield', 'label': 'Total Harvested', 'class': 'num'},
+        ],
+        'rows': [
+            {
+                'pk': c['crop_id'],
+                'crop': _main(c['crop__name'] or 'Unspecified crop'),
+                'seasons': c['season_count'],
+                'plants': c['total_plants'] or '-',
+                'per_plant': (
+                    f"{(c['total_harvested'] / c['total_plants']):.2f} {c['crop__default_unit'] or ''}".strip()
+                    if c['total_plants'] else '-'),
+                'harvests': c['harvest_count'],
+                'yield': f"{c['total_harvested']} {c['crop__default_unit'] or ''}".strip(),
+                'view_url': reverse('crop_detail', args=[c['crop_id']]) if c['crop_id'] else '',
+            } for c in crop_stats
+        ],
+        'has_actions': True,
+        'empty': 'No crops planted on this field.',
+    }
+    seasons_table = {
+        'title': 'Crop Seasons',
+        'columns': [
+            {'key': 'crop', 'label': 'Crop'},
+            {'key': 'planted', 'label': 'Planted'},
+            {'key': 'plants', 'label': 'Plants', 'class': 'num'},
+            {'key': 'per_plant', 'label': 'Harvest/Plant', 'class': 'num'},
+            {'key': 'status', 'label': 'Status'},
+        ],
+        'rows': _table_rows(seasons, lambda s: {
+            'crop': _main(s.crop.name, f'Expected: {s.expected_yield}' if s.expected_yield else ''),
+            'planted': s.planting_date,
+            'plants': s.plants_count if s.plants_count is not None else '-',
+            'per_plant': (
+                f"{(s.season_harvested / s.plants_count):.2f} {s.crop.default_unit or ''}".strip()
+                if s.plants_count else '-'),
+            'status': _status_pill(s.status, s.get_status_display()),
+            'view_url': reverse('crop_season_detail', args=[s.pk]),
+        }),
+        'has_actions': True,
+        'list_url': reverse('model_list', args=['crops', 'cropseason']),
+        'empty': 'No crop seasons on this field.',
+    }
+    usage_table = {
+        'title': 'Equipment Usage',
+        'columns': [
+            {'key': 'date', 'label': 'Date'},
+            {'key': 'equipment', 'label': 'Equipment'},
+            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+            {'key': 'description', 'label': 'Work'},
+        ],
+        'rows': _table_rows(usage, lambda u: {
+            'date': u.date, 'equipment': u.equipment.name,
+            'hours': f'{u.hours}h', 'description': u.description[:60],
+        }),
+        'empty': 'No equipment logged on this field.',
+    }
+    gps = obj.gps_coordinates or {}
+    gps_text = ''
+    if gps.get('lat') is not None and gps.get('lng') is not None:
+        gps_text = f"{gps['lat']}, {gps['lng']}"
+    context = {
+        'field': obj,
+        'nav': 'field',
+        'can_write': _can_write(request.user, obj._meta.label_lower),
+        'urls': _crud_urls('fields', 'field', pk=obj.pk),
+        'next_season': next_season,
+        'last_usage': usage[0] if usage else None,
+        'stats': [
             {'label': 'Acreage', 'value': f'{obj.acreage} ac', 'icon': 'layers', 'color': 'green'},
             {'label': 'Parcels', 'value': len(parcels), 'icon': 'tag', 'color': 'blue'},
             {'label': 'Crop Seasons', 'value': obj.crop_seasons.count(), 'icon': 'clock', 'color': 'amber'},
             {'label': 'Crops Grown', 'value': len(crop_stats), 'icon': 'layers', 'color': 'teal'},
             {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive', 'icon': 'check', 'color': 'teal' if obj.is_active else 'red'},
         ],
-        info_groups=info_groups, tables=tables, list_label='Fields')
+        'info_rows': [
+            {'label': 'Acreage', 'value': f'{obj.acreage} ac'},
+            {'label': 'Soil Type', 'value': obj.get_soil_type_display()},
+            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
+             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
+            {'label': 'Parcels', 'value': len(parcels)},
+            {'label': 'GPS', 'value': gps_text or '-'},
+        ],
+        'parcels_table': parcels_table,
+        'crops_table': crops_table,
+        'seasons_table': seasons_table,
+        'usage_table': usage_table,
+        'new_parcel_url': f"{reverse('model_create', kwargs={'app': 'fields', 'model': 'landparcel'})}?field={obj.pk}",
+        'new_season_url': f"{reverse('model_create', kwargs={'app': 'crops', 'model': 'cropseason'})}?field={obj.pk}",
+        'new_usage_url': f"{reverse('model_create', kwargs={'app': 'equipment', 'model': 'equipmentusage'})}?field={obj.pk}",
+    }
+    return render(request, 'fields/field_detail.html', context)
 
 
 @login_required
@@ -3000,66 +3081,91 @@ def landparcel_detail_view(request, pk):
 def equipment_detail_view(request, pk):
     from equipment.models import Equipment
     obj = get_object_or_404(
-        scoped_queryset(Equipment, request.user), pk=pk)
-    maint = obj.maintenance_logs.order_by('-date')[:10]
-    usage = obj.usage_records.select_related('field', 'crop_season', 'crop_season__crop').order_by('-date')[:10]
-    info_groups = [{
-        'title': 'Equipment',
-        'rows': [
-            {'label': 'Type', 'value': obj.get_equipment_type_display()},
-            {'label': 'Purchase Date', 'value': obj.purchase_date},
-            {'label': 'Purchase Cost', 'value': obj.purchase_cost, 'kind': 'money'},
-            {'label': 'Current Value', 'value': obj.current_value, 'kind': 'money'},
-            {'label': 'Depreciation', 'value': obj.depreciation, 'kind': 'money'},
-            {'label': 'Cost / Hour', 'value': obj.cost_per_hour, 'kind': 'money'},
-            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
-             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
-        ],
-    }]
-    tables = [
-        {
-            'title': 'Maintenance History',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'description', 'label': 'Work Done'},
-                {'key': 'by', 'label': 'Performed By'},
-                {'key': 'cost', 'label': 'Cost', 'class': 'num'},
-            ],
-            'rows': _table_rows(maint, lambda l: {
-                'date': l.date, 'description': l.description[:80],
-                'by': l.performed_by, 'cost': _money(l.cost),
-            }),
-            'list_url': reverse('model_list', args=['equipment', 'maintenancelog']),
-            'empty': 'No maintenance logged.',
-        },
-        {
-            'title': 'Usage Log',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'field', 'label': 'Field'},
-                {'key': 'season', 'label': 'Season'},
-                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
-            ],
-            'rows': _table_rows(usage, lambda u: {
-                'date': u.date,
-                'field': u.field.name if u.field_id else '',
-                'season': str(u.crop_season) if u.crop_season_id else '',
-                'hours': f'{u.hours}h',
-            }),
-            'list_url': reverse('model_list', args=['equipment', 'equipmentusage']),
-            'empty': 'No usage logged.',
-        },
+        scoped_queryset(Equipment, request.user).select_related('farm_profile'), pk=pk)
+    maint = obj.maintenance_logs.order_by('-date')[:15]
+    usage = obj.usage_records.select_related('field', 'crop_season', 'crop_season__crop').order_by('-date')[:15]
+    usage_totals = obj.usage_records.aggregate(
+        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()))
+    maint_spend = obj.total_maintenance_cost
+    ownership_cost = maint_spend + obj.depreciation
+    equipment_age = ''
+    if obj.purchase_date:
+        days = (datetime.date.today() - obj.purchase_date).days
+        equipment_age = f'{days // 365} yrs {(days % 365) // 30} mo' if days >= 365 else (
+            f'{days // 30} months' if days >= 60 else f'{days} days')
+    info_rows = [
+        {'label': 'Type', 'value': obj.get_equipment_type_display()},
+        {'label': 'Purchase Date', 'value': obj.purchase_date or '-'},
+        {'label': 'Age', 'value': equipment_age or '-'},
+        {'label': 'Purchase Cost', 'value': obj.purchase_cost, 'kind': 'money'},
+        {'label': 'Current Value', 'value': obj.current_value, 'kind': 'money'},
+        {'label': 'Depreciation', 'value': obj.depreciation, 'kind': 'money'},
+        {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
+         'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
     ]
-    return _record_detail(
-        request, 'equipment', 'equipment', obj, title=obj.name,
-        subtitle=f'{obj.farm_profile.farm_name} equipment', nav='equipment',
-        stats=[
+    cost_rows = [
+        {'label': 'Maintenance Spend', 'value': maint_spend, 'kind': 'money'},
+        {'label': 'Depreciation', 'value': obj.depreciation, 'kind': 'money'},
+        {'label': 'Total Cost of Ownership', 'value': ownership_cost, 'kind': 'money'},
+        {'label': 'Hours Used', 'value': f'{obj.hours_used}h'},
+        {'label': 'Cost / Hour', 'value': obj.cost_per_hour, 'kind': 'money'},
+        {'label': 'Last Service', 'value': maint[0].date if maint else 'Never'},
+        {'label': 'Last Used', 'value': usage[0].date if usage else 'Never'},
+    ]
+    maint_table = {
+        'title': 'Maintenance History',
+        'columns': [
+            {'key': 'date', 'label': 'Date'},
+            {'key': 'description', 'label': 'Work Done'},
+            {'key': 'by', 'label': 'Performed By'},
+            {'key': 'cost', 'label': 'Cost', 'class': 'num'},
+        ],
+        'rows': _table_rows(maint, lambda l: {
+            'date': l.date, 'description': l.description[:80],
+            'by': l.performed_by or '-', 'cost': _money(l.cost),
+        }),
+        'list_url': reverse('model_list', args=['equipment', 'maintenancelog']),
+        'empty': 'No maintenance logged.',
+    }
+    usage_table = {
+        'title': 'Usage Log',
+        'columns': [
+            {'key': 'date', 'label': 'Date'},
+            {'key': 'field', 'label': 'Field'},
+            {'key': 'season', 'label': 'Season'},
+            {'key': 'work', 'label': 'Work'},
+            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+        ],
+        'rows': _table_rows(usage, lambda u: {
+            'date': u.date,
+            'field': _main(u.field.name, '') if u.field_id else '-',
+            'season': str(u.crop_season) if u.crop_season_id else '-',
+            'work': u.description[:60] or '-',
+            'hours': f'{u.hours}h',
+        }),
+        'list_url': reverse('model_list', args=['equipment', 'equipmentusage']),
+        'empty': 'No usage logged.',
+    }
+    context = {
+        'equipment': obj,
+        'nav': 'equipment',
+        'can_write': _can_write(request.user, obj._meta.label_lower),
+        'urls': _crud_urls('equipment', 'equipment', pk=obj.pk),
+        'stats': [
             {'label': 'Hours Used', 'value': f'{obj.hours_used}h', 'icon': 'clock', 'color': 'green'},
-            {'label': 'Maintenance Spend', 'value': obj.total_maintenance_cost, 'icon': 'money', 'color': 'blue'},
+            {'label': 'Maintenance Spend', 'value': maint_spend, 'icon': 'money', 'color': 'blue'},
             {'label': 'Service Logs', 'value': obj.maintenance_logs.count(), 'icon': 'layers', 'color': 'amber'},
             {'label': 'Cost / Hour', 'value': obj.cost_per_hour, 'icon': 'money', 'color': 'teal'},
         ],
-        info_groups=info_groups, tables=tables, list_label='Equipment')
+        'info_rows': info_rows,
+        'cost_rows': cost_rows,
+        'maint_table': maint_table,
+        'usage_table': usage_table,
+        'logged_hours': usage_totals['hours'],
+        'new_maint_url': f"{reverse('model_create', kwargs={'app': 'equipment', 'model': 'maintenancelog'})}?equipment={obj.pk}",
+        'new_usage_url': f"{reverse('model_create', kwargs={'app': 'equipment', 'model': 'equipmentusage'})}?equipment={obj.pk}",
+    }
+    return render(request, 'equipment/equipment_detail.html', context)
 
 
 @login_required
@@ -3351,71 +3457,172 @@ def task_advance_view(request, pk):
 def animal_record_detail_view(request, pk):
     from livestock.models import AnimalRecord, BreedingRecord
     obj = get_object_or_404(
-        scoped_queryset(AnimalRecord, request.user).select_related('species', 'group'), pk=pk)
-    health = obj.health_records.order_by('-date')[:10]
+        scoped_queryset(AnimalRecord, request.user).select_related(
+            'species', 'group', 'parent_male', 'parent_female', 'farm_profile'), pk=pk)
+    health = obj.health_records.order_by('-date')[:15]
     breeding_qs = scoped_queryset(BreedingRecord, request.user).filter(
         Q(dam=obj) | Q(sire=obj)).order_by('-mating_date')
     breeding = breeding_qs[:10]
-    info_groups = [{
-        'title': 'Animal',
-        'rows': [
-            {'label': 'Tag', 'value': obj.tag_number},
-            {'label': 'Species', 'value': obj.species.name},
-            {'label': 'Group', 'value': obj.group.name if obj.group_id else ''},
-            {'label': 'Gender', 'value': obj.get_gender_display()},
-            {'label': 'Weight', 'value': f'{obj.current_weight_kg} kg' if obj.current_weight_kg else ''},
-            {'label': 'Acquisition Cost', 'value': obj.acquisition_cost, 'kind': 'money'},
-            {'label': 'Health', 'value': obj.get_health_status_display(), 'kind': 'pill',
-             'pill': _LIVESTOCK_PILL.get(obj.health_status, 'slate')},
-            {'label': 'Status', 'value': 'Sold' if obj.is_sold else 'On Farm', 'kind': 'pill',
-             'pill': 'blue' if obj.is_sold else 'green'},
-        ],
-    }]
-    tables = [
-        {
-            'title': 'Health Records',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'type', 'label': 'Type'},
-                {'key': 'description', 'label': 'Description'},
-                {'key': 'cost', 'label': 'Cost', 'class': 'num'},
-            ],
-            'rows': _table_rows(health, lambda h: {
-                'date': h.date, 'type': h.get_record_type_display(),
-                'description': h.description[:60], 'cost': _money(h.cost),
-            }),
-            'list_url': reverse('model_list', args=['livestock', 'animalhealthrecord']),
-            'empty': 'No health records.',
-        },
-        {
-            'title': 'Breeding Records',
-            'columns': [
-                {'key': 'date', 'label': 'Bred'},
-                {'key': 'status', 'label': 'Status'},
-                {'key': 'offspring', 'label': 'Offspring', 'class': 'num'},
-            ],
-            'rows': _table_rows(breeding, lambda b: {
-                'date': b.mating_date,
-                'status': _status_pill(b.status, b.get_status_display()),
-                'offspring': b.offspring_count,
-            }),
-            'list_url': reverse('model_list', args=['livestock', 'breedingrecord']),
-            'empty': 'No breeding records.',
-        },
+    offspring = scoped_queryset(AnimalRecord, request.user).filter(
+        Q(parent_male=obj) | Q(parent_female=obj)).select_related('species')
+    vet_spend = obj.health_records.aggregate(
+        t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t']
+    age_days = obj.age_days
+    if age_days is None:
+        age_text = '-'
+    elif age_days < 60:
+        age_text = f'{age_days} days'
+    elif age_days < 730:
+        age_text = f'{age_days // 30} months'
+    else:
+        age_text = f'{age_days // 365} yrs {(age_days % 365) // 30} mo'
+    info_rows = [
+        {'label': 'Tag Number', 'value': obj.tag_number},
+        {'label': 'Species', 'value': obj.species.name},
+        {'label': 'Group', 'value': obj.group.name if obj.group_id else '-'},
+        {'label': 'Gender', 'value': obj.get_gender_display()},
+        {'label': 'Age', 'value': age_text},
+        {'label': 'Weight', 'value': f'{obj.current_weight_kg} kg' if obj.current_weight_kg else '-'},
+        {'label': 'Health', 'value': obj.get_health_status_display(), 'kind': 'pill',
+         'pill': _LIVESTOCK_PILL.get(obj.health_status, 'slate')},
+        {'label': 'Status', 'value': 'Sold' if obj.is_sold else 'On Farm', 'kind': 'pill',
+         'pill': 'blue' if obj.is_sold else 'green'},
     ]
-    return _record_detail(
-        request, 'livestock', 'animalrecord', obj,
-        title=obj.name or obj.tag_number,
-        subtitle=f'{obj.species.name} · {obj.farm_profile.farm_name}',
-        nav='animalrecord',
-        status_pill={'text': obj.get_health_status_display(),
-                     'color': _LIVESTOCK_PILL.get(obj.health_status, 'slate')},
-        stats=[
-            {'label': 'Health Records', 'value': obj.health_records.count(), 'icon': 'heart', 'color': 'green'},
-            {'label': 'Vet Spend', 'value': obj.health_records.aggregate(t=Coalesce(Sum('cost'), 0, output_field=DecimalField()))['t'], 'icon': 'money', 'color': 'blue'},
-            {'label': 'Breeding Records', 'value': breeding_qs.count(), 'icon': 'layers', 'color': 'amber'},
+    lineage_rows = [
+        {'label': 'Sire (father)', 'value': str(obj.parent_male) if obj.parent_male_id else '-',
+         'url': reverse('animalrecord_detail', args=[obj.parent_male_id]) if obj.parent_male_id else ''},
+        {'label': 'Dam (mother)', 'value': str(obj.parent_female) if obj.parent_female_id else '-',
+         'url': reverse('animalrecord_detail', args=[obj.parent_female_id]) if obj.parent_female_id else ''},
+        {'label': 'Offspring', 'value': offspring.count()},
+        {'label': 'Acquired', 'value': obj.acquisition_date or '-'},
+        {'label': 'Acquisition Cost', 'value': obj.acquisition_cost, 'kind': 'money'},
+        {'label': 'Born', 'value': obj.birth_date or '-'},
+    ]
+    if obj.is_sold:
+        lineage_rows += [
+            {'label': 'Sale Date', 'value': obj.sale_date or '-'},
+            {'label': 'Sale Price', 'value': obj.sale_price, 'kind': 'money'},
+        ]
+    health_table = {
+        'title': 'Health Records',
+        'columns': [
+            {'key': 'date', 'label': 'Date'},
+            {'key': 'type', 'label': 'Type'},
+            {'key': 'description', 'label': 'Description'},
+            {'key': 'medication', 'label': 'Medication'},
+            {'key': 'next_due', 'label': 'Next Due'},
+            {'key': 'cost', 'label': 'Cost', 'class': 'num'},
         ],
-        info_groups=info_groups, tables=tables, list_label='Animal Records')
+        'rows': _table_rows(health, lambda h: {
+            'date': h.date, 'type': h.get_record_type_display(),
+            'description': h.description[:60], 'medication': h.medication or '-',
+            'next_due': h.next_due_date or '-', 'cost': _money(h.cost),
+        }),
+        'list_url': reverse('model_list', args=['livestock', 'animalhealthrecord']),
+        'empty': 'No health records.',
+    }
+    breeding_table = {
+        'title': 'Breeding Records',
+        'columns': [
+            {'key': 'date', 'label': 'Bred'},
+            {'key': 'role', 'label': 'Role'},
+            {'key': 'status', 'label': 'Status'},
+            {'key': 'expected', 'label': 'Expected Delivery'},
+            {'key': 'offspring', 'label': 'Offspring', 'class': 'num'},
+        ],
+        'rows': _table_rows(breeding, lambda b: {
+            'date': b.mating_date,
+            'role': 'Dam' if b.dam_id == obj.pk else 'Sire',
+            'status': _status_pill(b.status, b.get_status_display()),
+            'expected': b.expected_delivery_date or '-',
+            'offspring': b.offspring_count,
+        }),
+        'list_url': reverse('model_list', args=['livestock', 'breedingrecord']),
+        'empty': 'No breeding records.',
+    }
+    offspring_table = {
+        'title': 'Offspring',
+        'columns': [
+            {'key': 'tag', 'label': 'Tag'},
+            {'key': 'name', 'label': 'Name'},
+            {'key': 'gender', 'label': 'Gender'},
+            {'key': 'status', 'label': 'Health'},
+        ],
+        'rows': _table_rows(offspring, lambda a: {
+            'tag': _main(a.tag_number, a.species.name),
+            'name': a.name or '-',
+            'gender': a.get_gender_display(),
+            'status': _status_pill(a.health_status, a.get_health_status_display()),
+            'view_url': reverse('animalrecord_detail', args=[a.pk]),
+        }),
+        'has_actions': True,
+        'empty': 'No offspring recorded.',
+    }
+    breeding_initial = 'dam' if obj.gender == 'F' else 'sire'
+    context = {
+        'animal': obj,
+        'nav': 'animalrecord',
+        'can_write': _can_write(request.user, obj._meta.label_lower),
+        'urls': _crud_urls('livestock', 'animalrecord', pk=obj.pk),
+        'age_text': age_text,
+        'vet_spend': vet_spend,
+        'info_rows': info_rows,
+        'lineage_rows': lineage_rows,
+        'health_table': health_table,
+        'breeding_table': breeding_table,
+        'offspring_table': offspring_table,
+        'breeding_count': breeding_qs.count(),
+        'new_health_url': f"{reverse('model_create', kwargs={'app': 'livestock', 'model': 'animalhealthrecord'})}?animal={obj.pk}",
+        'new_breeding_url': f"{reverse('model_create', kwargs={'app': 'livestock', 'model': 'breedingrecord'})}?{breeding_initial}={obj.pk}",
+        'last_health': health[0] if health else None,
+    }
+    return render(request, 'livestock/animal_detail.html', context)
+
+
+@login_required
+def animal_register_view(request):
+    """Dedicated full-page animal registration form (grouped sections)."""
+    from livestock.models import AnimalRecord
+    label = AnimalRecord._meta.label_lower
+    if not request.user.is_superuser and not accessible_farms(
+            request.user, write_model=label).exists():
+        raise PermissionDenied
+    form_cls = _get_form_class(AnimalRecord)
+    next_url = request.GET.get('next') or request.POST.get('next') or ''
+    if request.method == 'POST':
+        form = _scope_form(form_cls(request.POST, request.FILES), request.user)
+        if form.is_valid():
+            obj = form.save()
+            target = next_url if next_url.startswith('/') else reverse(
+                'animalrecord_detail', args=[obj.pk])
+            return HttpResponseRedirect(target)
+    else:
+        initial = {k: v for k, v in request.GET.items() if k != 'next'}
+        if 'farm_profile' not in initial:
+            farm = accessible_farms(request.user, write_model=label).first()
+            if farm:
+                initial['farm_profile'] = farm.pk
+        form = _scope_form(form_cls(initial=initial), request.user)
+    sections = [
+        ('Identity', ['farm_profile', 'tag_number', 'name', 'species', 'gender', 'group']),
+        ('Birth & Condition', ['birth_date', 'current_weight_kg', 'health_status']),
+        ('Acquisition', ['acquisition_date', 'acquisition_cost']),
+        ('Lineage', ['parent_male', 'parent_female']),
+        ('Sale', ['is_sold', 'sale_date', 'sale_price']),
+        ('Notes', ['notes']),
+    ]
+    field_map = {f.name: f for f in form}
+    context = {
+        'form': form,
+        'nav': 'animalrecord',
+        'next_url': next_url,
+        'list_url': reverse('model_list', args=['livestock', 'animalrecord']),
+        'sections': [
+            (title, [field_map[n] for n in names if n in field_map])
+            for title, names in sections
+        ],
+    }
+    return render(request, 'livestock/animal_register.html', context)
 
 
 @login_required
@@ -3595,6 +3802,7 @@ def _field_seasons_json(user, exclude_pk=None):
             'crop': s.crop.name if s.crop_id else 'Unspecified crop',
             'season': s.planting_date.year,
             'status': s.get_status_display(),
+            'plants': s.plants_count,
         })
     return json.dumps(data)
 
@@ -4087,7 +4295,8 @@ def _export_letterhead(request, farm=None):
         except (ValueError, OSError):
             logo_path = None
     tagline = getattr(farm, 'tagline', '') or '' if farm else ''
-    return name, contact, logo_path, tagline
+    tin = f'TIN: {farm.tax_id}' if farm and getattr(farm, 'tax_id', '') else ''
+    return name, contact, logo_path, tagline, tin
 
 
 def _export_report(request, fmt, title, filename, sections, date_from, date_to, farm=None):
@@ -4105,8 +4314,8 @@ def _export_report(request, fmt, title, filename, sections, date_from, date_to, 
     except (TypeError, ValueError):
         rate = 1.0
     period = f'{date_from or "Start"} to {date_to or "Today"}'
-    farm_name, farm_contact, farm_logo, farm_tagline = _export_letterhead(
-        request, farm=farm)
+    farm_name, farm_contact, farm_logo, farm_tagline, farm_tin = (
+        _export_letterhead(request, farm=farm))
     generated = f'{datetime.date.today():%d %b %Y}'
 
     def num_val(cell):
@@ -4323,7 +4532,7 @@ def _export_report(request, fmt, title, filename, sections, date_from, date_to, 
     def draw_band(c, _doc):
         _draw_fiscal_band(
             c, doc.pagesize[0], doc.pagesize[1], farm_name=farm_name,
-            tagline=farm_tagline, contact=farm_contact,
+            contact=farm_contact, tin=farm_tin,
             title=title.upper(), subtitle=f'Period: {period}',
             logo_path=farm_logo)
 

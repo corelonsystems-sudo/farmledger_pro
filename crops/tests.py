@@ -8,7 +8,7 @@ from django.urls import reverse
 from accounts.models import FarmMembership, FarmProfile, User
 from crops.models import (
     Crop, CropSeason, Customer, HarvestRecord, Invoice, InvoiceItem,
-    ProcessingStage, Sale,
+    InvoicePayment, ProcessingStage, Sale,
 )
 from fields.models import Field
 from income.models import Income
@@ -1128,8 +1128,8 @@ class InvoiceDocumentTests(TestCase):
         page = self.client.get(reverse('invoice_detail', kwargs={'pk': invoice.pk}))
         body = page.content.decode()
         for marker in ('Billing Summary', 'Payment Progress', 'Invoice Items',
-                       'INVOICE ITEMS', 'Grade A, cleaned', 'Quantity, Price &amp; Production Cost',
-                       'Revenue vs Production Cost', 'Download PDF',
+                       'INVOICE ITEMS', 'Grade A, cleaned', 'Invoice Item Summary',
+                       'Revenue vs Production Cost', 'Download PDF', 'polyline',
                        'budget-toolbar', 'PAYMENTS'):
             self.assertIn(marker, body)
         self.assertNotIn('INVOICE DOCUMENT', body)
@@ -1145,3 +1145,147 @@ class InvoiceDocumentTests(TestCase):
         self.assertEqual(response['Content-Type'], 'application/pdf')
         self.assertIn('INV-', response['Content-Disposition'])
         self.assertTrue(response.content.startswith(b'%PDF-'))
+
+
+class InvoicePaymentIncomeTests(TestCase):
+    """Invoice payments book Income rows (sale-linked invoices excluded)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='pay-income', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Pay Farm')
+        self.customer = Customer.objects.create(farm_profile=self.farm, name='Pay Buyer')
+        self.invoice = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, buyer='Pay Buyer',
+            date=date(2026, 3, 1), status=Invoice.Status.ISSUED)
+
+    def _pay(self, **kwargs):
+        defaults = dict(invoice=self.invoice, amount=Decimal('5000'),
+                        date=date(2026, 3, 5), method=InvoicePayment.Method.BANK)
+        defaults.update(kwargs)
+        return InvoicePayment.objects.create(**defaults)
+
+    def test_payment_creates_income(self):
+        payment = self._pay()
+        income = Income.objects.get(invoice_payment=payment)
+        self.assertEqual(income.amount, Decimal('5000'))
+        self.assertEqual(income.date, date(2026, 3, 5))
+        self.assertEqual(income.farm_profile, self.farm)
+        self.assertEqual(income.source.name, 'Invoice Payments')
+        self.assertEqual(income.payment_method, Income.PaymentMethod.BANK_TRANSFER)
+        self.assertEqual(income.customer_ref, self.customer)
+
+    def test_payment_update_syncs_income(self):
+        payment = self._pay()
+        payment.amount = Decimal('7500')
+        payment.method = InvoicePayment.Method.CASH
+        payment.save()
+        income = Income.objects.get(invoice_payment=payment)
+        self.assertEqual(income.amount, Decimal('7500'))
+        self.assertEqual(income.payment_method, Income.PaymentMethod.CASH)
+        self.assertEqual(Income.objects.filter(invoice_payment=payment).count(), 1)
+
+    def test_payment_delete_removes_income(self):
+        payment = self._pay()
+        self.assertTrue(Income.objects.filter(invoice_payment=payment).exists())
+        payment.delete()
+        self.assertFalse(Income.objects.filter(invoice_payment=payment).exists())
+
+    def test_sale_linked_invoice_payment_skipped(self):
+        """Payments on a sale's auto invoice do not double-book income."""
+        item = InventoryItem.objects.create(
+            farm_profile=self.farm, name='Beans', unit='kg',
+            quantity_on_hand=Decimal('100'))
+        sale = Sale.objects.create(
+            inventory_item=item, sale_date=date(2026, 3, 2),
+            quantity=Decimal('10'), unit='kg', unit_price=Decimal('100'),
+            buyer='Sale Buyer', amount_received=Decimal('0'))
+        inv = Invoice.objects.get(sale=sale)  # auto-created by the sale signal
+        before = Income.objects.count()
+        self._pay(invoice=inv)
+        self.assertEqual(Income.objects.count(), before)
+
+
+class ProformaInvoiceTests(TestCase):
+    """Proforma invoices: numbering, no payments, PDF wording, conversion."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='proforma-owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Quote Farm')
+        self.customer = Customer.objects.create(farm_profile=self.farm, name='Quote Buyer')
+        self.client.force_login(self.user)
+
+    def _proforma(self):
+        pro = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, kind=Invoice.Kind.PROFORMA,
+            date=date(2026, 4, 1), due_date=date(2026, 4, 30),
+            status=Invoice.Status.ISSUED, tax_percent=Decimal('18'))
+        InvoiceItem.objects.create(
+            invoice=pro, description='Maize', quantity=Decimal('5'), unit='bag',
+            unit_price=Decimal('100000'), unit_cost=Decimal('60000'))
+        return pro
+
+    def test_proforma_number_uses_pro_prefix(self):
+        pro = self._proforma()
+        self.assertTrue(pro.number.startswith('PRO-'))
+        inv = Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 4, 1))
+        self.assertTrue(inv.number.startswith('INV-'))
+
+    def test_proforma_rejects_payments(self):
+        pro = self._proforma()
+        response = self.client.post(
+            reverse('invoice_record_payment', kwargs={'pk': pro.pk}),
+            {'amount': '1000', 'date': '2026-04-02', 'method': 'CASH'})
+        self.assertRedirects(response, reverse('invoice_detail', kwargs={'pk': pro.pk}))
+        self.assertEqual(pro.payments.count(), 0)
+        pro.refresh_from_db()
+        self.assertEqual(pro.status, Invoice.Status.ISSUED)
+
+    def test_proforma_pdf_is_labelled_and_not_fiscal(self):
+        pro = self._proforma()
+        response = self.client.get(reverse('invoice_pdf', kwargs={'pk': pro.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        from pypdf import PdfReader
+        from io import BytesIO
+        text = PdfReader(BytesIO(response.content)).pages[0].extract_text()
+        self.assertIn('PROFORMA INVOICE', text)
+        self.assertIn('NOT A TAX INVOICE', text)
+        self.assertIn('ESTIMATED TOTAL', text)
+        self.assertIn('Valid until', text)
+        self.assertNotIn('FISCAL VERIFICATION', text)
+        self.assertNotIn('Balance due', text)
+
+    def test_convert_creates_linked_invoice_with_items(self):
+        pro = self._proforma()
+        response = self.client.post(reverse('invoice_convert', kwargs={'pk': pro.pk}))
+        pro.refresh_from_db()
+        inv = pro.converted_invoice
+        self.assertIsNotNone(inv)
+        self.assertRedirects(response, reverse('invoice_detail', kwargs={'pk': inv.pk}))
+        self.assertEqual(inv.kind, Invoice.Kind.INVOICE)
+        self.assertTrue(inv.number.startswith('INV-'))
+        self.assertEqual(inv.status, Invoice.Status.ISSUED)
+        self.assertEqual(inv.items.count(), 1)
+        self.assertEqual(inv.total, pro.total)
+        self.assertEqual(inv.tax_percent, Decimal('18'))
+        # Converting again is a no-op that returns the same invoice.
+        self.client.post(reverse('invoice_convert', kwargs={'pk': pro.pk}))
+        pro.refresh_from_db()
+        self.assertEqual(pro.converted_invoice_id, inv.pk)
+        self.assertEqual(Invoice.objects.filter(kind=Invoice.Kind.INVOICE).count(), 1)
+
+    def test_list_filters_by_kind_and_excludes_proformas_from_billing(self):
+        pro = self._proforma()
+        Invoice.objects.create(
+            farm_profile=self.farm, customer=self.customer, date=date(2026, 4, 1),
+            status=Invoice.Status.ISSUED)
+        page = self.client.get(reverse('invoice_list') + '?kind=PROFORMA')
+        self.assertEqual([r['pk'] for r in page.context['rows']], [pro.pk])
+        page = self.client.get(reverse('invoice_list'))
+        stats = {s['label']: s['value'] for s in page.context['stats']}
+        self.assertEqual(stats['Invoices'], 1)
+        self.assertEqual(stats['Proformas'], 1)
+        self.assertEqual(stats['Total Billed'], Decimal('0'))
+        self.assertContains(page, 'Convert to Invoice')
+        self.assertContains(page, 'New Proforma')

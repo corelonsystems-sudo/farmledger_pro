@@ -1,8 +1,9 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from .models import HarvestRecord, ProcessingStage, Sale
-from .services import sync_processing_expense, sync_sale_income, sync_sale_invoice
+from .models import HarvestRecord, InvoicePayment, ProcessingStage, Sale
+from .services import (sync_invoice_payment_income, sync_processing_expense,
+                       sync_sale_income, sync_sale_invoice)
 
 
 @receiver(post_save, sender=HarvestRecord)
@@ -26,6 +27,17 @@ def sync_income_from_sale(sender, instance, **kwargs):
     """
     sync_sale_income(instance)
     sync_sale_invoice(instance)
+
+
+@receiver(post_save, sender=InvoicePayment)
+def sync_income_from_invoice_payment(sender, instance, **kwargs):
+    """Book each invoice payment into the income ledger.
+
+    Sale-linked invoices are skipped inside the service (their revenue is
+    already tracked by Income.sale). Deleting the payment removes the
+    income via the CASCADE on Income.invoice_payment.
+    """
+    sync_invoice_payment_income(instance)
 
 
 @receiver(post_save, sender=ProcessingStage)

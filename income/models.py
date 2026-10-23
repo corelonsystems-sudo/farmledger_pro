@@ -111,6 +111,14 @@ class Income(models.Model):
         null=True,
         blank=True,
     )
+    invoice_payment = models.ForeignKey(
+        'crops.InvoicePayment',
+        on_delete=models.CASCADE,
+        related_name='income_records',
+        help_text='Auto-generated income linked to this invoice payment; removed when the payment is deleted.',
+        null=True,
+        blank=True,
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateField()
     customer = models.CharField(max_length=200, blank=True, default='')

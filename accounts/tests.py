@@ -441,6 +441,8 @@ class DatabaseBackupTests(TestCase):
         import sqlite3
         from pathlib import Path
         from django.conf import settings
+        backups_dir = Path(settings.BASE_DIR) / 'backups'
+        existing = set(backups_dir.glob('pre-import-*.sqlite3'))
         response = self.client.post(
             reverse('database_import'),
             {'dbfile': self._valid_db_file(), 'confirm': '1'})
@@ -452,14 +454,16 @@ class DatabaseBackupTests(TestCase):
         count = con.execute('SELECT COUNT(*) FROM accounts_user').fetchone()[0]
         con.close()
         self.assertEqual(count, 0)
-        # A timestamped backup of the previous database exists.
-        backups = list((Path(settings.BASE_DIR) / 'backups').glob('pre-import-*.sqlite3'))
-        self.assertEqual(len(backups), 1)
-        bcon = sqlite3.connect(str(backups[0]))
+        # A new timestamped backup of the previous database was created.
+        new_backups = [p for p in backups_dir.glob('pre-import-*.sqlite3')
+                       if p not in existing]
+        self.assertEqual(len(new_backups), 1)
+        bcon = sqlite3.connect(str(new_backups[0]))
         bcount = bcon.execute('SELECT COUNT(*) FROM accounts_user').fetchone()[0]
         bcon.close()
         self.assertEqual(bcount, 1)  # the seeded user
-        shutil.rmtree(Path(settings.BASE_DIR) / 'backups')
+        for p in new_backups:
+            p.unlink(missing_ok=True)
 
 
 class SystemLogoConfigTests(TestCase):

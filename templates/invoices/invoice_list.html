@@ -23,6 +23,13 @@
     .pill-PAID { background:#d1fae5; color:#065f46; }
     .pill-CANCELLED { background:#fee2e2; color:#b91c1c; }
     .overdue-tag { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px; background:#fee2e2; color:#b91c1c; font-size:.62rem; font-weight:700; }
+    .kind-tag { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px; background:#fef3c7; color:#92400e; font-size:.62rem; font-weight:700; letter-spacing:.03em; vertical-align:middle; }
+    .converted-note { display:block; color:var(--text-muted); font-size:.68rem; margin-top:2px; }
+    .inv-toolbar .btn-ghost { background:transparent; border:1px solid rgba(255,255,255,.55); color:#fff; }
+    .inv-toolbar .btn-ghost:hover { background:rgba(255,255,255,.12); }
+    .inv-tabs { display:inline-flex; gap:4px; }
+    .inv-tabs a { padding:4px 11px; border-radius:999px; font-size:.72rem; font-weight:600; color:var(--text-muted); text-decoration:none; border:1px solid var(--border); }
+    .inv-tabs a.active { background:#1b4332; color:#fff; border-color:#1b4332; }
     .row-actions { display:inline-flex; gap:6px; flex-wrap:wrap; }
     .action-btn { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:6px; background:#eef6f1; color:#1b4332; font-size:.7rem; font-weight:600; text-decoration:none; border:1px solid #d4dcd7; }
     .action-btn svg { width:12px; height:12px; }
@@ -40,7 +47,10 @@
         <p>{{ subtitle }}</p>
     </div>
     {% if can_write %}
-    <a class="btn btn-primary" href="{{ create_url }}">+ New Invoice</a>
+    <div style="display:flex;gap:8px;">
+        <a class="btn btn-ghost" href="{{ create_proforma_url }}">+ New Proforma</a>
+        <a class="btn btn-primary" href="{{ create_url }}">+ New Invoice</a>
+    </div>
     {% endif %}
 </header>
 
@@ -52,8 +62,15 @@
 
 <div class="table-card">
     <div class="table-card-head">
-        <h3>All Invoices</h3>
-        <span class="row-count">{{ rows|length }} invoice{{ rows|length|pluralize }}</span>
+        <h3>{% if kind == 'PROFORMA' %}Proforma Invoices{% elif kind == 'INVOICE' %}Invoices{% else %}All Documents{% endif %}</h3>
+        <div style="display:flex;align-items:center;gap:14px;">
+            <nav class="inv-tabs" aria-label="Document type">
+                <a href="{% url 'invoice_list' %}" class="{% if not kind %}active{% endif %}">All</a>
+                <a href="{% url 'invoice_list' %}?kind=INVOICE" class="{% if kind == 'INVOICE' %}active{% endif %}">Invoices</a>
+                <a href="{% url 'invoice_list' %}?kind=PROFORMA" class="{% if kind == 'PROFORMA' %}active{% endif %}">Proformas</a>
+            </nav>
+            <span class="row-count">{{ rows|length }} document{{ rows|length|pluralize }}</span>
+        </div>
     </div>
     {% if rows %}
     <div style="overflow-x:auto;">
@@ -68,20 +85,27 @@
         <tbody>
             {% for r in rows %}
             <tr>
-                <td><a class="link" href="{{ r.detail_url }}"><strong>{{ r.number }}</strong></a></td>
+                <td>
+                    <a class="link" href="{{ r.detail_url }}"><strong>{{ r.number }}</strong></a>{% if r.is_proforma %}<span class="kind-tag">PROFORMA</span>{% endif %}
+                    {% if r.converted_number %}<span class="converted-note">&rarr; <a class="link" href="{{ r.converted_url }}">{{ r.converted_number }}</a></span>{% endif %}
+                </td>
                 <td>{{ r.buyer }}</td>
                 <td>{{ r.date|date:"d M Y" }}</td>
                 <td>{{ r.due_date|date:"d M Y"|default:"-" }}{% if r.overdue %}<span class="overdue-tag">Overdue</span>{% endif %}</td>
                 <td class="num amount">{{ r.total|as_currency:currency }}</td>
-                <td class="num amount">{{ r.paid|as_currency:currency }}</td>
-                <td class="num amount{% if r.balance > 0 %}{% if r.overdue %} cell-red{% endif %}{% endif %}">{{ r.balance|as_currency:currency }}</td>
+                <td class="num amount">{% if r.is_proforma %}-{% else %}{{ r.paid|as_currency:currency }}{% endif %}</td>
+                <td class="num amount{% if r.balance > 0 %}{% if r.overdue %} cell-red{% endif %}{% endif %}">{% if r.is_proforma %}-{% else %}{{ r.balance|as_currency:currency }}{% endif %}</td>
                 <td><span class="pill-badge pill-{{ r.status }}">{{ r.status_label }}</span></td>
                 <td style="text-align:right;">
                     <div class="row-actions">
                         <a class="action-btn" href="{{ r.detail_url }}">View</a>
                         <a class="action-btn" href="{{ r.pdf_url }}">Print</a>
                         <a class="action-btn" href="{{ r.pdf_url }}">PDF</a>
-                        {% if can_write and r.status != 'PAID' and r.status != 'CANCELLED' and r.balance > 0 %}
+                        {% if r.is_proforma %}
+                            {% if can_write and not r.converted_number %}
+                            <form method="post" action="{{ r.convert_url }}" style="display:inline;">{% csrf_token %}<button type="submit" class="action-btn">Convert to Invoice</button></form>
+                            {% endif %}
+                        {% elif can_write and r.status != 'PAID' and r.status != 'CANCELLED' and r.balance > 0 %}
                         <a class="action-btn" href="javascript:void(0)" data-modal-url="{{ r.payment_url }}" data-modal-title="Record Payment - {{ r.number }}">Payment</a>
                         {% endif %}
                         {% if can_write %}

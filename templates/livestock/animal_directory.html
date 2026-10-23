@@ -1,0 +1,234 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ title }} - FarmLedger Pro{% endblock %}
+{% block breadcrumbs %}{{ section|default:'Animals' }} &rsaquo; {{ title }}{% endblock %}
+{% block nav_animal_records %}active{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "reports/report_styles.html" %}
+<style>
+    .report-grid { grid-template-columns: 1.1fr 1fr .9fr; }
+    @media (max-width: 1100px) { .report-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 700px) { .report-grid { grid-template-columns: 1fr; } }
+    .anm-stat-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:.8rem; }
+    .anm-stat-row:last-child { border-bottom:0; }
+    .anm-stat-row .lbl { display:flex; align-items:center; gap:8px; color:var(--text); }
+    .anm-stat-row .lg-dot { width:9px; height:9px; border-radius:2px; display:inline-block; }
+    .anm-stat-row .val { font-weight:700; color:var(--primary-dark); white-space:nowrap; }
+    .anm-stat-bar { flex:1; margin:0 6px; }
+    .anm-value-rows { margin-top:6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="title-block">
+        <h2>{{ title }}</h2>
+        <p>{{ subtitle }}</p>
+    </div>
+    <div class="page-actions">
+        {% if can_write %}
+        <a class="btn btn-primary" href="{% url 'animal_register' %}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Register Animal
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+{% if stats %}
+<div class="kpi-grid">
+    {% for stat in stats %}
+    <div class="kpi-card">
+        <div class="kpi-icon {{ stat.color|default:'green' }}">
+            {% if stat.icon == 'money' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            {% elif stat.icon == 'clock' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {% elif stat.icon == 'alert' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {% elif stat.icon == 'heart' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            {% elif stat.icon == 'layers' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            {% elif stat.icon == 'check' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            {% elif stat.icon == 'tag' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>{% endif %}
+        </div>
+        <div>
+            <div class="kpi-value">{{ stat.value }}</div>
+            <div class="kpi-label">{{ stat.label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if anm_species_donut or anm_gender_rows or anm_health_rows %}
+<div class="report-grid" style="margin-bottom:18px;">
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Herd by Species</h3>
+            <span class="row-count">{{ anm_species_total }} animal{{ anm_species_total|pluralize }}</span>
+        </div>
+        {% if anm_species_donut %}
+        {% include "reports/donut.html" with segments=anm_species_donut center_num=anm_species_total center_lbl="Animals" %}
+        {% else %}
+        <div class="empty-state"><p>No animals</p><span>Add animal records to see the breakdown.</span></div>
+        {% endif %}
+    </div>
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Composition &amp; Health</h3>
+            <span class="row-count">share of herd</span>
+        </div>
+        <div style="padding:14px 18px;">
+            {% if anm_gender_rows %}
+            <div style="font-size:.66rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin-bottom:6px;">By gender</div>
+            {% for g in anm_gender_rows %}
+            <div class="anm-stat-row">
+                <span class="lbl"><span class="lg-dot" data-bg="{{ g.color }}"></span>{{ g.label }}</span>
+                <span class="anm-stat-bar hbar"><span data-width="{{ g.pct }}" data-bg="{{ g.color }}"></span></span>
+                <span class="val">{{ g.count }} &middot; {{ g.pct }}%</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if anm_health_rows %}
+            <div style="font-size:.66rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); margin:14px 0 6px;">By health status</div>
+            {% for h in anm_health_rows %}
+            <div class="anm-stat-row">
+                <span class="lbl"><span class="pill-badge pill-{{ h.pill }}">{{ h.label }}</span></span>
+                <span class="anm-stat-bar hbar crop"><span data-width="{{ h.pct }}"></span></span>
+                <span class="val">{{ h.count }} &middot; {{ h.pct }}%</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if not anm_gender_rows and not anm_health_rows %}
+            <div class="empty-state"><p>No data</p><span>Breakdowns will appear here.</span></div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="table-card">
+        <div class="table-card-head">
+            <h3>Herd Value</h3>
+            <span class="row-count">on-farm animals</span>
+        </div>
+        <div class="anm-value-rows" style="padding:14px 18px;">
+            <div class="anm-stat-row"><span class="lbl">Herd value (acquisition cost)</span><span class="val">{{ anm_herd_value|as_currency:currency }}</span></div>
+            <div class="anm-stat-row"><span class="lbl">Sales revenue</span><span class="val">{{ anm_sale_revenue|as_currency:currency }}</span></div>
+            <div class="anm-stat-row"><span class="lbl">Average weight (on farm)</span><span class="val">{% if anm_avg_weight %}{{ anm_avg_weight|floatformat:1 }} kg{% else %}-{% endif %}</span></div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details class="filter-panel" {% if filters_active %}open{% endif %}>
+    <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        Filters
+        {% if filters_active %}<span class="active-count">Active</span>{% endif %}
+        <svg class="filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </summary>
+    <form class="filter-body" method="get">
+        {% for f in filters %}
+        <div class="form-group">
+            <label for="{{ f.name }}">{{ f.label }}</label>
+            {% if f.type == 'select' %}
+            <select name="{{ f.name }}" id="{{ f.name }}">
+                <option value="">{{ f.all_label|default:'All' }}</option>
+                {% for value, label in f.options %}
+                <option value="{{ value }}" {% if f.value == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            {% else %}
+            <input type="{{ f.type|default:'text' }}" name="{{ f.name }}" id="{{ f.name }}" value="{{ f.value }}" placeholder="{{ f.placeholder }}">
+            {% endif %}
+        </div>
+        {% endfor %}
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                Apply Filters
+            </button>
+            <a href="?" class="btn btn-secondary">Reset</a>
+        </div>
+    </form>
+</details>
+
+<div class="table-card">
+    <div class="table-card-head">
+        <h3>{{ table_title|default:title }}</h3>
+        <span class="row-count">
+            {{ page_obj.paginator.count }} record{{ page_obj.paginator.count|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %}&bull; Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
+    </div>
+    {% if rows %}
+    <div style="overflow-x:auto;">
+        <table class="list-table">
+            <thead>
+                <tr>
+                    {% for col in columns %}<th{% if col.class == 'num' %} class="num"{% endif %}>{{ col.label }}</th>{% endfor %}
+                    <th style="text-align:right;">{% if can_write %}Actions{% endif %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    {% for col in columns %}
+                    {% with cell=row|get_item:col.key %}
+                    <td{% if col.class %} class="{{ col.class }}"{% endif %}>
+                        {% if cell.kind == 'pill' %}<span class="pill-badge pill-{{ cell.pill }}">{{ cell.text }}</span>
+                        {% elif cell.kind == 'money' %}<span{% if col.class == 'num' %} class="amount"{% endif %}>{{ cell.value|as_currency:currency }}</span>
+                        {% elif cell.kind == 'main' %}<strong>{{ cell.text }}</strong>{% if cell.sub %}<div class="sub-text">{{ cell.sub }}</div>{% endif %}
+                        {% else %}{{ cell }}{% endif %}
+                    </td>
+                    {% endwith %}
+                    {% endfor %}
+                    <td>
+                        <div class="row-actions">
+                            {% for action in row.actions %}
+                            <form method="post" action="{{ action.url }}" style="display:inline;">{% csrf_token %}
+                                <button type="submit" class="action-btn" style="border:0;cursor:pointer;">{{ action.label }}</button>
+                            </form>
+                            {% endfor %}
+                            {% if row.detail_url %}
+                            <a class="action-btn" href="{{ row.detail_url }}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                View
+                            </a>
+                            {% endif %}
+                            {% if can_write %}
+                            <a class="action-btn" data-modal-url="{% url 'model_update' app=app model=model pk=row.pk %}" data-modal-title="Edit" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002-2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                Edit
+                            </a>
+                            <a class="action-btn delete" data-modal-url="{% url 'model_delete' app=app model=model pk=row.pk %}" data-modal-title="Delete" href="javascript:void(0)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                Delete
+                            </a>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 7l-5 5v8h12v-8l-5-5"/><path d="M11 7V3h2v4"/></svg>
+        <p>No {{ title|lower }} found</p>
+        <span>Try adjusting your filters, or add a new record.</span>
+    </div>
+    {% endif %}
+
+    {% if page_obj.has_other_pages %}
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="current">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+        <a href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

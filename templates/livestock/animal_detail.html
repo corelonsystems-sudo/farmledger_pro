@@ -1,0 +1,217 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ animal.name|default:animal.tag_number }} - FarmLedger Pro{% endblock %}
+{% block nav_animal_records %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">Animal Records</a> &rsaquo; {{ animal.name|default:animal.tag_number }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; }
+    .budget-avatar svg { width:34px; height:34px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; }
+    .budget-header-status.HEALTHY { background:#d5f4df; color:#14532d; }
+    .budget-header-status.SICK { background:#fee2e2; color:#b91c1c; }
+    .budget-header-status.TREATED { background:#fff0c2; color:#795414; }
+    .budget-header-status.QUARANTINED { background:#fff0c2; color:#795414; }
+    .budget-header-status.DECEASED { background:#e2e8f0; color:#475569; }
+    .budget-header-status.sold { background:#dbeafe; color:#1e40af; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:420px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden] { display:none!important; }
+    .tab-badge { background:#e8f0ea; color:#1b4332; border-radius:10px; padding:1px 8px; font-size:.66rem; font-weight:700; }
+    .anm-overview-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; }
+    .anm-card { background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .anm-card h3 { margin:0 0 14px; color:#1b4332; font-size:.9rem; }
+    .anm-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px solid #e3ebe6; font-size:.8rem; }
+    .anm-row:last-child { border-bottom:0; }
+    .anm-row span { color:#64748b; }
+    .anm-row strong { text-align:right; color:#1f2937; }
+    .anm-row strong a { color:#1b4332; }
+    .anm-notes { margin:10px 0 0; padding:10px 12px; border-left:3px solid #2d6a4f; background:#eef5f0; color:#64748b; font-size:.78rem; border-radius:4px; }
+    .anm-quick { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+    .panel { margin-bottom:16px; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px; }
+    .panel-head h3 { margin:0; color:var(--primary-dark); font-weight:700; font-size:.95rem; }
+    .panel-head .head-actions { display:flex; gap:8px; align-items:center; }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:720px) { .anm-overview-grid { grid-template-columns:1fr; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; } .budget-avatar svg { width:26px; height:26px; } }
+    @media print {
+        .sidebar,.topbar,.budget-toolbar .actions,.no-print { display:none!important; }
+        .main { margin:0; padding:0; }
+        .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; }
+        .budget-toolbar h1,.budget-eyebrow,.budget-header-subtitle,.budget-header-tag { color:#1b4332; }
+        .budget-header-tag,.budget-header-status { background:white; border-color:#ccd5d0; }
+        .budget-paper { border:0; padding:0; }
+        .budget-tabs { display:none!important; }
+        .budget-tab-panel[hidden] { display:block!important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="animal-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 7h.01M3.4 18H12a8 8 0 008-8V7a4 4 0 00-7.28-2.3L2 20"/><path d="m20 7 2 .5-2 .5"/><path d="M10 18v3"/><path d="M14 17.75V21"/><path d="M7 18a6 6 0 00.84-3.09"/></svg></div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Animal Record</p>
+            <h1 id="animal-page-title">{{ animal.name|default:animal.tag_number }}</h1>
+            <p class="budget-header-subtitle">{{ animal.species.name }} &middot; {{ animal.farm_profile.farm_name }}{% if animal.group %} &middot; {{ animal.group.name }}{% endif %}</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {{ animal.health_status }}">{{ animal.get_health_status_display }}</span>
+                {% if animal.is_sold %}<span class="budget-header-status sold">Sold</span>{% endif %}
+                <span class="budget-header-tag">Tag {{ animal.tag_number }}</span>
+                <span class="budget-header-tag">{{ animal.get_gender_display }}</span>
+                {% if animal.current_weight_kg %}<span class="budget-header-tag">{{ animal.current_weight_kg }} kg</span>{% endif %}
+                <span class="budget-header-tag">{{ age_text }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ urls.list }}">&larr; Back to Animal Records</a>
+        {% if can_write %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_health_url }}&amp;next={{ request.path }}" data-modal-title="New Health Record">+ Health Record</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit Animal">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete Animal">Delete</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="kpi-grid">
+    <div class="kpi-card"><div><div class="kpi-label">Health Records</div><div class="kpi-value">{{ animal.health_records.count }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Vet Spend</div><div class="kpi-value">{{ vet_spend|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Breeding Records</div><div class="kpi-value">{{ breeding_count }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Offspring</div><div class="kpi-value">{{ offspring_table.rows|length }}</div></div></div>
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Animal sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-anm-overview" aria-selected="true" aria-controls="anm-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-anm-health" aria-selected="false" aria-controls="anm-health" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>HEALTH <span class="tab-badge">{{ animal.health_records.count }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-anm-breeding" aria-selected="false" aria-controls="anm-breeding" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>BREEDING <span class="tab-badge">{{ breeding_count }}</span></button>
+</nav>
+
+<section class="budget-tab-panel" id="anm-overview" role="tabpanel" aria-labelledby="tab-anm-overview" tabindex="0">
+    <div class="anm-overview-grid">
+        <article class="anm-card">
+            <h3>Animal Details</h3>
+            {% for row in info_rows %}
+            <div class="anm-row"><span>{{ row.label }}</span>
+                <strong>{% if row.kind == 'pill' %}<span class="pill-badge pill-{{ row.pill }}">{{ row.value }}</span>{% else %}{{ row.value|default:'-' }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+            {% if animal.notes %}<div class="anm-notes">{{ animal.notes }}</div>{% endif %}
+        </article>
+        <article class="anm-card">
+            <h3>Lineage &amp; Acquisition</h3>
+            {% for row in lineage_rows %}
+            <div class="anm-row"><span>{{ row.label }}</span>
+                <strong>
+                    {% if row.kind == 'money' %}{{ row.value|as_currency:currency }}
+                    {% elif row.url %}<a href="{{ row.url }}">{{ row.value }}</a>
+                    {% else %}{{ row.value|default:'-' }}{% endif %}
+                </strong>
+            </div>
+            {% endfor %}
+            <div class="anm-row"><span>Last vet visit</span>
+                <strong>{% if last_health %}{{ last_health.date|date:"d M Y" }} &middot; {{ last_health.get_record_type_display }}{% else %}Never{% endif %}</strong>
+            </div>
+            {% if can_write %}
+            <div class="anm-quick no-print">
+                <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ new_health_url }}&amp;next={{ request.path }}" data-modal-title="New Health Record">+ Health Record</a>
+                {% if animal.is_breeding_stock %}
+                <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_breeding_url }}&amp;next={{ request.path }}" data-modal-title="New Breeding Record">+ Breeding</a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="anm-health" role="tabpanel" aria-labelledby="tab-anm-health" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ health_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_health_url }}&amp;next={{ request.path }}" data-modal-title="New Health Record">+ Add</a>{% endif %}
+                <a class="action-btn" href="{{ health_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=health_table %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="anm-breeding" role="tabpanel" aria-labelledby="tab-anm-breeding" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ breeding_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write and animal.is_breeding_stock %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_breeding_url }}&amp;next={{ request.path }}" data-modal-title="New Breeding Record">+ Add</a>{% endif %}
+                <a class="action-btn" href="{{ breeding_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=breeding_table %}
+    </div>
+    <div class="panel">
+        <div class="panel-head"><h3>{{ offspring_table.title }}</h3></div>
+        {% include "dashboard/table_panel.html" with table=offspring_table %}
+    </div>
+</section>
+</div>
+
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
+{% endblock %}

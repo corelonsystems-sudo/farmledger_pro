@@ -1,0 +1,230 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ field.name }} - FarmLedger Pro{% endblock %}
+{% block nav_fields %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">Fields</a> &rsaquo; {{ field.name }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; font-size:1.8rem; font-weight:700; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; }
+    .budget-header-status.active { background:#d5f4df; color:#14532d; }
+    .budget-header-status.inactive { background:#e2e8f0; color:#475569; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:420px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden] { display:none!important; }
+    .tab-badge { background:#e8f0ea; color:#1b4332; border-radius:10px; padding:1px 8px; font-size:.66rem; font-weight:700; }
+    .fld-overview-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; }
+    .fld-card { background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .fld-card h3 { margin:0 0 14px; color:#1b4332; font-size:.9rem; }
+    .fld-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px solid #e3ebe6; font-size:.8rem; }
+    .fld-row:last-child { border-bottom:0; }
+    .fld-row span { color:#64748b; }
+    .fld-row strong { text-align:right; color:#1f2937; }
+    .fld-row strong a { color:#1b4332; }
+    .fld-snapshot-note { margin:10px 0 0; font-size:.78rem; color:var(--text-muted); }
+    .fld-quick { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+    .panel { margin-bottom:16px; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px; }
+    .panel-head h3 { margin:0; color:var(--primary-dark); font-weight:700; font-size:.95rem; }
+    .panel-head .head-actions { display:flex; gap:8px; align-items:center; }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:720px) { .fld-overview-grid { grid-template-columns:1fr; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; font-size:1.4rem; } }
+    @media print {
+        .sidebar,.topbar,.budget-toolbar .actions,.no-print { display:none!important; }
+        .main { margin:0; padding:0; }
+        .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; }
+        .budget-toolbar h1,.budget-eyebrow,.budget-header-subtitle,.budget-header-tag { color:#1b4332; }
+        .budget-header-tag,.budget-header-status { background:white; border-color:#ccd5d0; }
+        .budget-paper { border:0; padding:0; }
+        .budget-tabs { display:none!important; }
+        .budget-tab-panel[hidden] { display:block!important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="field-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true">{{ field.name|first|upper }}</div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Field</p>
+            <h1 id="field-page-title">{{ field.name }}</h1>
+            <p class="budget-header-subtitle">{{ field.farm_profile.farm_name }} field</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {% if field.is_active %}active{% else %}inactive{% endif %}">{% if field.is_active %}Active{% else %}Inactive{% endif %}</span>
+                <span class="budget-header-tag">{{ field.acreage }} ac</span>
+                <span class="budget-header-tag">{{ field.get_soil_type_display }} soil</span>
+                <span class="budget-header-tag">{{ field.parcels.count }} parcel{{ field.parcels.count|pluralize }}</span>
+                <span class="budget-header-tag">{{ field.crop_seasons.count }} season{{ field.crop_seasons.count|pluralize }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ urls.list }}">&larr; Back to Fields</a>
+        {% if can_write %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit Field">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete Field">Delete</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="kpi-grid">
+    {% for stat in stats %}
+    <div class="kpi-card">
+        <div class="kpi-icon {{ stat.color|default:'green' }}">
+            {% if stat.icon == 'clock' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {% elif stat.icon == 'layers' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            {% elif stat.icon == 'check' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            {% elif stat.icon == 'tag' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>{% endif %}
+        </div>
+        <div>
+            <div class="kpi-value">{{ stat.value }}</div>
+            <div class="kpi-label">{{ stat.label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Field sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-fld-overview" aria-selected="true" aria-controls="fld-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-fld-parcels" aria-selected="false" aria-controls="fld-parcels" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>PARCELS <span class="tab-badge">{{ field.parcels.count }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-fld-crops" aria-selected="false" aria-controls="fld-crops" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 22V10"/><path d="M12 10C12 5 8 2 3 2c0 6 4 8 9 8z"/><path d="M12 14c0-4 3-7 9-7 0 5-4 7-9 7z"/></svg>CROP HISTORY <span class="tab-badge">{{ seasons_table.rows|length }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-fld-equipment" aria-selected="false" aria-controls="fld-equipment" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2" y="6" width="14" height="10" rx="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M16 10h4l2 4v4h-6"/></svg>EQUIPMENT <span class="tab-badge">{{ usage_table.rows|length }}</span></button>
+</nav>
+
+<section class="budget-tab-panel" id="fld-overview" role="tabpanel" aria-labelledby="tab-fld-overview" tabindex="0">
+    <div class="fld-overview-grid">
+        <article class="fld-card">
+            <h3>Field Details</h3>
+            {% for row in info_rows %}
+            <div class="fld-row"><span>{{ row.label }}</span>
+                <strong>{% if row.kind == 'pill' %}<span class="pill-badge pill-{{ row.pill }}">{{ row.value }}</span>{% else %}{{ row.value|default:'-' }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+        </article>
+        <article class="fld-card">
+            <h3>Field Snapshot</h3>
+            <div class="fld-row"><span>Current crop</span>
+                <strong>{% if next_season %}{{ next_season.crop.name|default:"Unspecified crop" }} &middot; {{ next_season.get_status_display }}{% else %}None{% endif %}</strong>
+            </div>
+            {% if next_season %}
+            <div class="fld-row"><span>Planted</span><strong>{{ next_season.planting_date|date:"d M Y" }}</strong></div>
+            <div class="fld-row"><span>Plants on field</span><strong>{{ next_season.plants_count|default:"-" }}</strong></div>
+            <div class="fld-row"><span>Expected harvest</span><strong>{% if next_season.expected_harvest_date %}{{ next_season.expected_harvest_date|date:"d M Y" }}{% else %}-{% endif %}</strong></div>
+            <div class="fld-row"><span></span><strong><a href="{% url 'crop_season_detail' next_season.pk %}">View season &rarr;</a></strong></div>
+            {% endif %}
+            <div class="fld-row"><span>Last equipment use</span>
+                <strong>{% if last_usage %}{{ last_usage.date|date:"d M Y" }} &middot; {{ last_usage.equipment.name }}{% else %}Never{% endif %}</strong>
+            </div>
+            {% if can_write %}
+            <div class="fld-quick no-print">
+                <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ new_season_url }}&amp;next={{ request.path }}" data-modal-title="New Crop Season">+ New Season</a>
+                <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_parcel_url }}&amp;next={{ request.path }}" data-modal-title="New Land Parcel">+ Parcel</a>
+                <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_usage_url }}&amp;next={{ request.path }}" data-modal-title="Log Equipment Use">+ Equipment</a>
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="fld-parcels" role="tabpanel" aria-labelledby="tab-fld-parcels" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ parcels_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_parcel_url }}&amp;next={{ request.path }}" data-modal-title="New Land Parcel">+ Add</a>{% endif %}
+                <a class="action-btn" href="{{ parcels_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=parcels_table %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="fld-crops" role="tabpanel" aria-labelledby="tab-fld-crops" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head"><h3>{{ crops_table.title }}</h3></div>
+        {% include "dashboard/table_panel.html" with table=crops_table %}
+    </div>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ seasons_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_season_url }}&amp;next={{ request.path }}" data-modal-title="New Crop Season">+ Add</a>{% endif %}
+                <a class="action-btn" href="{{ seasons_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=seasons_table %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="fld-equipment" role="tabpanel" aria-labelledby="tab-fld-equipment" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ usage_table.title }}</h3>
+            {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_usage_url }}&amp;next={{ request.path }}" data-modal-title="Log Equipment Use">+ Log use</a>{% endif %}
+        </div>
+        {% include "dashboard/table_panel.html" with table=usage_table %}
+    </div>
+</section>
+</div>
+
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
+{% endblock %}

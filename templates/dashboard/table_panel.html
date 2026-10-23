@@ -1,0 +1,37 @@
+{% load currency_tags %}
+{% if table.rows %}
+<div style="overflow-x:auto;">
+    <table class="list-table">
+        <thead>
+            <tr>
+                {% for col in table.columns %}<th{% if col.class == 'num' %} class="num"{% endif %}>{{ col.label }}</th>{% endfor %}
+                {% if table.has_actions %}<th style="text-align:right;">Actions</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in table.rows %}
+            <tr>
+                {% for col in table.columns %}
+                {% with cell=row|get_item:col.key %}
+                <td{% if col.class %} class="{{ col.class }}"{% endif %}>
+                    {% if cell.kind == 'pill' %}<span class="pill-badge pill-{{ cell.pill }}">{{ cell.text }}</span>
+                    {% elif cell.kind == 'money' %}<span{% if col.class == 'num' %} class="amount"{% endif %}>{{ cell.value|as_currency:currency }}</span>
+                    {% elif cell.kind == 'main' %}<strong>{{ cell.text }}</strong>{% if cell.sub %}<div class="sub-text">{{ cell.sub }}</div>{% endif %}
+                    {% else %}{{ cell }}{% endif %}
+                </td>
+                {% endwith %}
+                {% endfor %}
+                {% if table.has_actions %}
+                <td style="text-align:right; white-space:nowrap;">
+                    {% if row.edit_url %}<a class="action-btn" href="javascript:void(0)" data-modal-url="{{ row.edit_url }}" data-modal-title="Edit">Edit</a>{% endif %}
+                    {% if row.view_url %}<a class="action-btn" href="{{ row.view_url }}">View</a>{% endif %}
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state"><p>{{ table.empty|default:'Nothing here yet' }}</p></div>
+{% endif %}

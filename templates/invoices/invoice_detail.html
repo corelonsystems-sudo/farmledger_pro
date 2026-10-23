@@ -122,13 +122,16 @@
     <div class="budget-header-identity">
         <div class="budget-avatar" aria-hidden="true">{% if invoice.farm_profile.logo %}<img src="{{ invoice.farm_profile.logo.url }}" alt="">{% else %}{{ invoice.farm_profile.farm_name|first|upper }}{% endif %}</div>
         <div class="budget-header-copy">
-            <p class="budget-eyebrow">Invoice</p>
+            <p class="budget-eyebrow">{% if invoice.is_proforma %}Proforma Invoice{% else %}Invoice{% endif %}</p>
             <h1 id="invoice-page-title">{{ invoice.number }}</h1>
             <p class="budget-header-subtitle">Bill to: {{ invoice.buyer|default:"-" }} &middot; {{ invoice.farm_profile.farm_name }}</p>
             <div class="budget-header-meta">
                 <span class="budget-header-status {{ invoice.status }}">{{ invoice.get_status_display }}</span>
+                {% if invoice.is_proforma %}<span class="budget-header-tag" style="background:#fef3c7;color:#92400e;">Not a tax invoice</span>{% endif %}
+                {% if invoice.converted_invoice %}<span class="budget-header-tag">Converted &rarr; <a href="{% url 'invoice_detail' invoice.converted_invoice.pk %}" style="color:inherit;">{{ invoice.converted_invoice.number }}</a></span>{% endif %}
+                {% if source_proforma %}<span class="budget-header-tag">From <a href="{% url 'invoice_detail' source_proforma.pk %}" style="color:inherit;">{{ source_proforma.number }}</a></span>{% endif %}
                 <span class="budget-header-tag">{{ invoice.date|date:"d M Y" }}</span>
-                <span class="budget-header-tag">Due {{ invoice.due_date|date:"d M Y"|default:"on receipt" }}</span>
+                <span class="budget-header-tag">{% if invoice.is_proforma %}Valid until {{ invoice.due_date|date:"d M Y"|default:"-" }}{% else %}Due {{ invoice.due_date|date:"d M Y"|default:"on receipt" }}{% endif %}</span>
                 <span class="budget-header-tag">{{ items|length }} item{{ items|length|pluralize }}</span>
                 <span class="budget-header-tag">{{ currency.code }}</span>
             </div>
@@ -138,21 +141,30 @@
         <a class="budget-back" href="{% url 'invoice_list' %}">&larr; Back to Invoices</a>
         {% if can_write %}
         <a class="btn btn-secondary" href="{{ edit_url }}">Edit</a>
-        {% if balance > 0 and invoice.status != 'CANCELLED' %}
+        {% if invoice.is_proforma %}
+            {% if not invoice.converted_invoice %}
+            <form method="post" action="{{ convert_url }}" style="display:inline;">{% csrf_token %}<button type="submit" class="btn btn-secondary">Convert to Invoice</button></form>
+            {% endif %}
+        {% elif balance > 0 and invoice.status != 'CANCELLED' %}
         <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">Record Payment</a>
         {% endif %}
-        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ delete_url }}" data-modal-title="Delete Invoice">Delete</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ delete_url }}" data-modal-title="Delete {% if invoice.is_proforma %}Proforma{% else %}Invoice{% endif %}">Delete</a>
         {% endif %}
         <a class="btn btn-primary" href="{{ pdf_url }}">Download PDF</a>
-        <a class="btn btn-secondary" href="{{ pdf_url }}">Print Invoice</a>
+        <a class="btn btn-secondary" href="{{ pdf_url }}">Print {% if invoice.is_proforma %}Proforma{% else %}Invoice{% endif %}</a>
     </div>
 </header>
 
 <div class="kpi-grid">
     <div class="kpi-card"><div><div class="kpi-label">Subtotal</div><div class="kpi-value">{{ subtotal|as_currency:currency }}</div></div></div>
-    <div class="kpi-card"><div><div class="kpi-label">Total Due</div><div class="kpi-value">{{ total|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">{% if invoice.is_proforma %}Estimated Total{% else %}Total Due{% endif %}</div><div class="kpi-value">{{ total|as_currency:currency }}</div></div></div>
+    {% if invoice.is_proforma %}
+    <div class="kpi-card"><div><div class="kpi-label">Tax</div><div class="kpi-value">{{ tax_amount|as_currency:currency }}</div></div></div>
+    <div class="kpi-card"><div><div class="kpi-label">Valid Until</div><div class="kpi-value">{{ invoice.due_date|date:"d M Y"|default:"-" }}</div></div></div>
+    {% else %}
     <div class="kpi-card"><div><div class="kpi-label">Amount Paid</div><div class="kpi-value">{{ amount_paid|as_currency:currency }}</div></div></div>
     <div class="kpi-card"><div><div class="kpi-label">Balance Due</div><div class="kpi-value {% if balance > 0 %}balance-negative{% endif %}">{{ balance|as_currency:currency }}</div></div></div>
+    {% endif %}
 </div>
 
 <div class="budget-paper">
@@ -178,6 +190,16 @@
             {% endif %}
         </article>
         <article class="inv-overview-card">
+            {% if invoice.is_proforma %}
+            <h3>Proforma Status</h3>
+            <div class="inv-overview-row"><span>Estimated total</span><strong>{{ total|as_currency:currency }}</strong></div>
+            <div class="inv-overview-row"><span>Valid until</span><strong>{{ invoice.due_date|date:"d M Y"|default:"-" }}</strong></div>
+            <div class="inv-overview-row"><span>Converted</span><strong>{% if invoice.converted_invoice %}<a class="link" href="{% url 'invoice_detail' invoice.converted_invoice.pk %}">{{ invoice.converted_invoice.number }}</a>{% else %}Not yet{% endif %}</strong></div>
+            <p style="margin:10px 0 0;font-size:.78rem;color:var(--text-muted);">A proforma is a quotation. It takes no payments and is not a fiscal document; convert it to an invoice when the customer confirms the order.</p>
+            {% if can_write and not invoice.converted_invoice %}
+            <form method="post" action="{{ convert_url }}" style="margin-top:14px;">{% csrf_token %}<button type="submit" class="btn btn-primary">Convert to Invoice</button></form>
+            {% endif %}
+            {% else %}
             <h3>Payment Progress</h3>
             <div class="inv-overview-row"><span>Total due</span><strong>{{ total|as_currency:currency }}</strong></div>
             <div class="inv-overview-row"><span>Received</span><strong>{{ amount_paid|as_currency:currency }}</strong></div>
@@ -194,6 +216,7 @@
             {% if can_write and balance > 0 and invoice.status != 'CANCELLED' %}
             <a class="btn btn-primary" style="margin-top:14px;" href="javascript:void(0)"
                data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">+ Record Payment</a>
+            {% endif %}
             {% endif %}
         </article>
     </div>

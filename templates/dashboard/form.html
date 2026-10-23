@@ -107,6 +107,7 @@
                     var li = document.createElement('li');
                     var main = document.createElement('span');
                     main.textContent = r.crop + ' (' + r.season + ')';
+                    if (r.plants != null) main.textContent += ' - ' + r.plants + ' plants';
                     var status = document.createElement('span');
                     status.className = 'fcp-status';
                     status.textContent = r.status;

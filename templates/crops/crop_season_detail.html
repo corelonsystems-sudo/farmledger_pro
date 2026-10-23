@@ -44,6 +44,7 @@
         <div class="summary-row"><span class="label">Field</span><span class="value">{{ field|default:"-" }}</span></div>
         <div class="summary-row"><span class="label">Variety</span><span class="value">{{ season.variety|default:"-" }}</span></div>
         <div class="summary-row"><span class="label">Planted</span><span class="value">{{ season.planting_date }}</span></div>
+        <div class="summary-row"><span class="label">Plants/Trees on Field</span><span class="value">{{ season.plants_count|default:"-" }}</span></div>
         <div class="summary-row"><span class="label">Expected Harvest</span><span class="value">{{ season.expected_harvest_date|default:"-" }}</span></div>
         <div class="summary-row"><span class="label">Actual Harvest</span><span class="value">{{ season.actual_harvest_date|default:"-" }}</span></div>
         <div class="summary-row"><span class="label">Status</span><span class="value">{{ season.get_status_display }}</span></div>
@@ -60,6 +61,9 @@
         {% endif %}
         {% if yield_per_acre is not None %}
         <div class="summary-row"><span class="label">Yield per Acre</span><span class="value">{{ yield_per_acre|floatformat:2 }} {{ yield_unit }}/ac</span></div>
+        {% endif %}
+        {% if yield_per_plant is not None %}
+        <div class="summary-row"><span class="label">Yield per Plant/Tree</span><span class="value">{{ yield_per_plant|floatformat:2 }} {{ yield_unit }}</span></div>
         {% endif %}
         <div class="summary-row"><span class="label">Unprocessed in Store</span><span class="value">{{ quantity_in_store }} {{ crop.default_unit }}</span></div>
         <div class="summary-row"><span class="label">Processed in Store</span><span class="value">{{ total_processed_in_store }} {{ crop.default_unit }}</span></div>

@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django import forms
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Prefetch
@@ -792,6 +793,7 @@ def crop_season_detail_view(request, pk):
         'net_profit': net_profit,
         'expected_yield': season.expected_yield,
         'yield_per_acre': yield_per_acre,
+        'yield_per_plant': season.yield_per_plant,
         'yield_variance': yield_variance,
         'yield_unit': primary_unit,
         'chart_data': chart_data,
@@ -1027,10 +1029,14 @@ def invoice_list_view(request):
     q = request.GET.get('q', '')
     status = request.GET.get('status', '')
     customer_id = request.GET.get('customer', '')
+    kind = request.GET.get('kind', '')
 
     queryset = scoped_queryset(
         Invoice, request.user,
-        Invoice.objects.select_related('customer').prefetch_related('items', 'payments'))
+        Invoice.objects.select_related('customer', 'converted_invoice')
+        .prefetch_related('items', 'payments'))
+    if kind in Invoice.Kind.values:
+        queryset = queryset.filter(kind=kind)
     queryset = queryset.annotate(
         billed=Coalesce(Sum(
             F('items__quantity') * F('items__unit_price'),
@@ -1049,10 +1055,17 @@ def invoice_list_view(request):
     today = date.today()
     rows = []
     for inv in queryset:
-        balance = max(inv.billed - inv.paid, Decimal('0'))
+        is_proforma = inv.kind == Invoice.Kind.PROFORMA
+        balance = Decimal('0') if is_proforma else max(inv.billed - inv.paid, Decimal('0'))
         rows.append({
             'pk': inv.pk,
             'number': inv.number,
+            'kind': inv.kind,
+            'is_proforma': is_proforma,
+            'converted_number': (inv.converted_invoice.number
+                                 if inv.converted_invoice_id else ''),
+            'converted_url': (reverse('invoice_detail', args=[inv.converted_invoice_id])
+                              if inv.converted_invoice_id else ''),
             'buyer': inv.buyer or (inv.customer.name if inv.customer else '-'),
             'date': inv.date,
             'due_date': inv.due_date,
@@ -1061,23 +1074,25 @@ def invoice_list_view(request):
             'balance': balance,
             'status': inv.status,
             'status_label': inv.get_status_display(),
-            'overdue': bool(inv.due_date and inv.due_date < today and balance > 0
-                            and inv.status != Invoice.Status.CANCELLED),
+            'overdue': bool(not is_proforma and inv.due_date and inv.due_date < today
+                            and balance > 0 and inv.status != Invoice.Status.CANCELLED),
             'detail_url': reverse('invoice_detail', args=[inv.pk]),
             'payment_url': reverse('invoice_record_payment', args=[inv.pk]),
+            'convert_url': reverse('invoice_convert', args=[inv.pk]),
             'edit_url': reverse('invoice_edit', args=[inv.pk]),
             'delete_url': reverse('invoice_delete', args=[inv.pk]),
             'pdf_url': reverse('invoice_pdf', args=[inv.pk]),
         })
 
+    real = [r for r in rows if not r['is_proforma']]
     stats = [
-        {'label': 'Invoices', 'value': len(rows), 'icon': 'layers', 'color': 'green'},
-        {'label': 'Total Billed', 'value': sum((r['total'] for r in rows), Decimal('0')),
+        {'label': 'Invoices', 'value': len(real), 'icon': 'layers', 'color': 'green'},
+        {'label': 'Total Billed', 'value': sum((r['total'] for r in real), Decimal('0')),
          'icon': 'money', 'color': 'blue', 'is_money': True},
-        {'label': 'Outstanding', 'value': sum((r['balance'] for r in rows), Decimal('0')),
+        {'label': 'Outstanding', 'value': sum((r['balance'] for r in real), Decimal('0')),
          'icon': 'money', 'color': 'amber', 'is_money': True},
-        {'label': 'Overdue', 'value': sum(1 for r in rows if r['overdue']),
-         'icon': 'check', 'color': 'red'},
+        {'label': 'Proformas', 'value': sum(1 for r in rows if r['is_proforma']),
+         'icon': 'check', 'color': 'amber'},
     ]
     can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
     context = {
@@ -1085,11 +1100,13 @@ def invoice_list_view(request):
         'stats': stats,
         'q': q,
         'status': status,
+        'kind': kind,
         'customer_id': customer_id,
         'status_choices': Invoice.Status.choices,
         'customers': scoped_queryset(Customer, request.user).order_by('name'),
         'can_write': can_write,
         'create_url': reverse('invoice_create'),
+        'create_proforma_url': reverse('invoice_create') + '?kind=PROFORMA',
         'title': 'Invoices',
         'subtitle': 'Bill customers for produce and inventory sales, record payments, and print.',
         'today': today,
@@ -1100,9 +1117,13 @@ def invoice_list_view(request):
 class InvoiceForm(forms.ModelForm):
     class Meta:
         model = Invoice
-        fields = ['farm_profile', 'customer', 'buyer', 'date', 'due_date',
+        fields = ['farm_profile', 'kind', 'customer', 'buyer', 'date', 'due_date',
                   'payment_terms', 'reference', 'tax_percent', 'discount',
                   'payment_details', 'status', 'notes']
+        labels = {'kind': 'Document type'}
+        help_texts = {
+            'due_date': 'For a proforma this is the "valid until" date.',
+        }
         widgets = {
             'buyer': forms.TextInput(attrs={'placeholder': 'Leave blank to use the customer name'}),
             'payment_terms': forms.TextInput(attrs={'placeholder': 'e.g. Net 30'}),
@@ -1111,7 +1132,7 @@ class InvoiceForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Notes & terms shown on the invoice...'}),
         }
 
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, initial_kind=None, **kwargs):
         super().__init__(*args, **kwargs)
         farms = _invoice_write_farms(user) if user else accessible_farms(None)
         self.fields['farm_profile'].queryset = farms
@@ -1120,14 +1141,26 @@ class InvoiceForm(forms.ModelForm):
             Customer, user, Customer.objects.all()) if user else Customer.objects.none()
         self.fields['customer'].required = False
         self.fields['buyer'].required = False
+        self.fields['kind'].required = False  # falls back to the model default
+        # Proformas never carry payments, so the paid statuses do not apply.
+        self.fields['status'].choices = [
+            c for c in Invoice.Status.choices
+            if c[0] not in (Invoice.Status.PARTIAL, Invoice.Status.PAID)
+        ] if (initial_kind == Invoice.Kind.PROFORMA
+              or self.instance.kind == Invoice.Kind.PROFORMA) else Invoice.Status.choices
         if self.instance.pk is None:
             self.fields['date'].initial = date.today()
+            if initial_kind in Invoice.Kind.values:
+                self.initial['kind'] = initial_kind
             default_farm = farms.first()
             if default_farm:
                 if default_farm.invoice_payment_details:
                     self.initial['payment_details'] = default_farm.invoice_payment_details
                 if default_farm.invoice_notes:
                     self.initial['notes'] = default_farm.invoice_notes
+
+    def clean_kind(self):
+        return self.cleaned_data.get('kind') or Invoice.Kind.INVOICE
 
 
 @login_required
@@ -1144,7 +1177,8 @@ def invoice_form_view(request, pk=None):
         fields=['description', 'detail', 'quantity', 'unit', 'unit_price', 'unit_cost'],
         extra=1, can_delete=True, max_num=50, validate_max=True)
     data = request.POST if request.method == 'POST' else None
-    form = InvoiceForm(data, instance=invoice, user=request.user)
+    form = InvoiceForm(data, instance=invoice, user=request.user,
+                       initial_kind=request.GET.get('kind', ''))
     items = Items(data, instance=invoice, prefix='items')
     if data is not None:
         if form.is_valid() and items.is_valid():
@@ -1154,11 +1188,14 @@ def invoice_form_view(request, pk=None):
                 items.save()
                 invoice.refresh_status()
             return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))
+    is_proforma = (invoice.kind == Invoice.Kind.PROFORMA if pk
+                   else request.GET.get('kind') == Invoice.Kind.PROFORMA)
     return render(request, 'invoices/invoice_form.html', {
         'form': form,
         'items': items,
         'invoice': invoice,
         'action': 'Edit' if pk else 'New',
+        'doc_label': 'Proforma Invoice' if is_proforma else 'Invoice',
     })
 
 
@@ -1239,8 +1276,11 @@ def invoice_detail_view(request, pk):
                        'value': step * i} for i in range(5)],
         }
     can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
+    source_proforma = (Invoice.objects.filter(converted_invoice=invoice).first()
+                       if not invoice.is_proforma else None)
     return render(request, 'invoices/invoice_detail.html', {
         'invoice': invoice,
+        'source_proforma': source_proforma,
         'items': items,
         'chart_rows': chart_rows,
         'line_chart': line_chart,
@@ -1254,6 +1294,7 @@ def invoice_detail_view(request, pk):
         'bank': bank,
         'can_write': can_write,
         'payment_url': reverse('invoice_record_payment', args=[invoice.pk]),
+        'convert_url': reverse('invoice_convert', args=[invoice.pk]),
         'edit_url': reverse('invoice_edit', args=[invoice.pk]),
         'delete_url': reverse('invoice_delete', args=[invoice.pk]),
         'pdf_url': reverse('invoice_pdf', args=[invoice.pk]),
@@ -1321,62 +1362,120 @@ def _fiscal_qr_image(payload, mm_size=24):
 FISCAL_BAND_HEIGHT_MM = 30
 
 
-def _draw_fiscal_band(c, page_width, page_height, *, farm_name, tagline,
-                      contact, title, subtitle, logo_path):
-    """Plain letterhead drawn directly on the canvas (no background).
+def _document_fonts():
+    """(regular, bold, italic) for fiscal documents.
 
-    Logo beside the farm identity on the left, document title on the
-    right, closed by a thin double rule.
+    Registers Arial from the OS font dir when available (the invoice
+    template's font); falls back to Helvetica on systems without it.
+    """
+    from reportlab.pdfbase import pdfmetrics
+    if 'DocSans' in pdfmetrics.getRegisteredFontNames():
+        bold = 'DocSans-Bold' if 'DocSans-Bold' in pdfmetrics.getRegisteredFontNames() else 'DocSans'
+        ital = 'DocSans-Italic' if 'DocSans-Italic' in pdfmetrics.getRegisteredFontNames() else 'DocSans'
+        return 'DocSans', bold, ital
+    import os
+    from reportlab.pdfbase.ttfonts import TTFont
+    font_dirs = [os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'),
+                 '/usr/share/fonts/truetype/msttcorefonts',
+                 '/usr/share/fonts/truetype/ttf-mscorefonts',
+                 '/usr/share/fonts/truetype']
+    registered = {}
+    for reg_name, candidates in {
+            'DocSans': ('arial.ttf', 'Arial.ttf'),
+            'DocSans-Bold': ('arialbd.ttf', 'arialbd.TTF', 'Arial Bold.ttf'),
+            'DocSans-Italic': ('ariali.ttf', 'ariali.TTF', 'Arial Italic.ttf')}.items():
+        for base in font_dirs:
+            for fname in candidates:
+                path = os.path.join(base, fname)
+                if os.path.exists(path):
+                    try:
+                        pdfmetrics.registerFont(TTFont(reg_name, path))
+                        registered[reg_name] = True
+                    except Exception:
+                        pass
+                    break
+            if reg_name in registered:
+                break
+    if 'DocSans' in registered:
+        bold = 'DocSans-Bold' if 'DocSans-Bold' in registered else 'DocSans'
+        ital = 'DocSans-Italic' if 'DocSans-Italic' in registered else 'DocSans'
+        pdfmetrics.registerFontFamily(
+            'DocSans', normal='DocSans', bold=bold, italic=ital,
+            boldItalic=bold)
+        return 'DocSans', bold, ital
+    return 'Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique'
+
+
+def _draw_fiscal_band(c, page_width, page_height, *, farm_name, contact,
+                      tin, title, subtitle, logo_path=None):
+    """Letterhead matching the shared invoice document: logo + farm name +
+    contact and TIN lines on the left, document title + number on the
+    right, closed by a single green rule. Drawn directly on the canvas.
     """
     from reportlab.lib import colors
     from reportlab.lib.units import mm
 
-    dark = colors.HexColor('#1b4332')
-    primary = colors.HexColor('#2d6a4f')
-    muted = colors.HexColor('#64748b')
+    font, font_b, _ = _document_fonts()
+    green = colors.HexColor('#2F5D3A')
+    muted = colors.HexColor('#6B7A8D')
+    tint = colors.HexColor('#DDE3E8')
     band_h = FISCAL_BAND_HEIGHT_MM * mm
     top = page_height
+    left = 18 * mm
+    right = page_width - 18 * mm
 
-    x = 18 * mm
+    # Identity block is vertically centred on the logo.
+    block_top = top - 7 * mm
     logo_h = 19 * mm
+    centre_y = block_top - logo_h / 2
+    x = left
     if logo_path:
         try:
             from PIL import Image as _PILImage
             with _PILImage.open(logo_path) as pim:
                 lw, lh = pim.size
             logo_w = logo_h * (lw / lh) if lh else logo_h
-            c.drawImage(logo_path, x, top - 5.5 * mm - logo_h,
+            c.drawImage(logo_path, x, block_top - logo_h,
                         width=logo_w, height=logo_h, mask='auto')
             x += logo_w + 5 * mm
         except Exception:
             pass
 
-    base = top - 11 * mm
-    c.setFillColor(dark)
-    c.setFont('Helvetica-Bold', 14)
-    c.drawString(x, base, farm_name)
-    c.setFillColor(primary)
-    c.setFont('Helvetica-Bold', 6.5)
-    c.drawString(x, base - 5 * mm, tagline.upper() if tagline else '')
+    # Farm name + contact + TIN, stacked and centred against the logo.
+    lines = [l for l in (contact, tin) if l]
+    stack_h = 15 * 0.72 + len(lines) * 4.6 * mm
+    y = centre_y + stack_h / 2 - 15 * 0.72
+    c.setFillColor(green)
+    c.setFont(font_b, 15)
+    c.drawString(x, y, farm_name)
     c.setFillColor(muted)
-    c.setFont('Helvetica', 7.5)
-    # c.drawString(x, base - 10.5 * mm, contact)
+    c.setFont(font, 8.5)
+    for line in lines:
+        y -= 4.6 * mm
+        c.drawString(x, y, line)
 
-    right = page_width - 18 * mm
-    c.setFillColor(dark)
-    c.setFont('Helvetica-Bold', 19)
-    c.drawRightString(right, top - 13 * mm, title)
-    c.setFillColor(primary)
-    c.setFont('Helvetica-Bold', 8.5)
-    c.drawRightString(right, top - 20 * mm, subtitle)
+    # Title block, right-aligned and centred on the same axis. Long titles
+    # (e.g. PROFORMA INVOICE) step down so they never run into the farm name.
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    title_size = 24
+    max_title_w = right - x - stringWidth(farm_name, font_b, 15) - 8 * mm
+    while title_size > 14 and stringWidth(title, font_b, title_size) > max_title_w:
+        title_size -= 1
+    c.setFillColor(green)
+    c.setFont(font_b, title_size)
+    c.drawRightString(right, centre_y + 1 * mm, title)
+    c.setFillColor(muted)
+    c.setFont(font_b, 9.5)
+    c.drawRightString(right, centre_y - 4.5 * mm, subtitle)
 
-    # Thin double rule closing the header.
-    c.setStrokeColor(dark)
-    c.setLineWidth(1.4)
-    c.line(18 * mm, top - band_h, right, top - band_h)
-    c.setStrokeColor(primary)
-    c.setLineWidth(0.5)
-    c.line(18 * mm, top - band_h - 1.4 * mm, right, top - band_h - 1.4 * mm)
+    # Closing rule: slim green accent under the title, soft hairline across.
+    rule_y = top - band_h
+    c.setStrokeColor(tint)
+    c.setLineWidth(0.6)
+    c.line(left, rule_y, right, rule_y)
+    c.setStrokeColor(green)
+    c.setLineWidth(2)
+    c.line(right - 42 * mm, rule_y, right, rule_y)
 
 
 @login_required
@@ -1406,24 +1505,31 @@ def invoice_pdf_view(request, pk):
     def money(value):
         return f'{symbol} {value:,.2f}'
 
-    primary = colors.HexColor('#2d6a4f')
-    dark = colors.HexColor('#1b4332')
-    muted = colors.HexColor('#64748b')
+    font, font_b, font_i = _document_fonts()
+    green = colors.HexColor('#2F5D3A')
+    muted = colors.HexColor('#6B7A8D')
+    line_c = colors.HexColor('#DDE3E8')
+    shade = colors.HexColor('#F3F6F4')
+    red = colors.HexColor('#C00000')
     label_style = ParagraphStyle(
-        'SectionLabel', fontName='Helvetica-Bold', fontSize=7.5, leading=10,
-        textColor=primary)
+        'SectionLabel', fontName=font_b, fontSize=9, leading=12,
+        textColor=green)
     name_style = ParagraphStyle(
-        'Name', fontName='Helvetica-Bold', fontSize=11, leading=14, textColor=dark)
+        'Name', fontName=font_b, fontSize=12, leading=15,
+        textColor=colors.black)
     muted_style = ParagraphStyle(
-        'Muted', fontName='Helvetica', fontSize=8, leading=11, textColor=muted)
+        'Muted', fontName=font, fontSize=10, leading=13, textColor=muted)
     cell_style = ParagraphStyle(
-        'Cell', fontName='Helvetica', fontSize=8.5, leading=11, textColor=dark)
-    cell_muted = ParagraphStyle('CellMuted', parent=cell_style, fontSize=7.5, textColor=muted)
-    cell_bold = ParagraphStyle('CellBold', parent=cell_style, fontName='Helvetica-Bold')
+        'Cell', fontName=font, fontSize=10, leading=13, textColor=colors.black)
+    cell_muted = ParagraphStyle('CellMuted', parent=cell_style, fontSize=8, textColor=muted)
+    cell_bold = ParagraphStyle('CellBold', parent=cell_style, fontName=font_b)
     numeric_style = ParagraphStyle(
-        'Numeric', parent=cell_style, alignment=2, fontName='Helvetica')
+        'Numeric', parent=cell_style, alignment=2, fontName=font)
     numeric_bold = ParagraphStyle(
-        'NumericBold', parent=numeric_style, fontName='Helvetica-Bold')
+        'NumericBold', parent=numeric_style, fontName=font_b)
+    head_cell = ParagraphStyle(
+        'HeadCell', parent=cell_style, fontName=font_b, textColor=green)
+    head_cell_r = ParagraphStyle('HeadCellR', parent=head_cell, alignment=2)
 
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -1457,8 +1563,8 @@ def invoice_pdf_view(request, pk):
         def _draw_invoice_header(self):
             _draw_fiscal_band(
                 self, A4[0], A4[1], farm_name=farm.farm_name,
-                tagline=farm.tagline, contact=contact,
-                title='TAX INVOICE',
+                contact=contact, tin=tin_line,
+                title=invoice.document_title,
                 subtitle=f'No. {invoice.number}',
                 logo_path=farm.logo.path if farm.logo else None)
 
@@ -1467,29 +1573,49 @@ def invoice_pdf_view(request, pk):
             left = 18 * mm
             right = page_width - 18 * mm
 
-            # Fiscal verification block, bottom-left beside the signature.
-            from reportlab.lib.utils import ImageReader
-            qr_size = 19 * mm
-            self.drawImage(ImageReader(qr_buf), left, 16 * mm,
-                           width=qr_size, height=qr_size, mask='auto')
-            tx = left + qr_size + 4 * mm
-            self.setFillColor(primary)
-            self.setFont('Helvetica-Bold', 7.5)
-            self.drawString(tx, 32.5 * mm, 'FISCAL VERIFICATION')
-            self.setFillColor(dark)
-            self.setFont('Helvetica-Bold', 9)
-            self.drawString(tx, 27.5 * mm, f'Verification code: {ver_code}')
-            self.setFillColor(muted)
-            self.setFont('Helvetica', 7.5)
-            self.drawString(
-                tx, 22.5 * mm,
-                f'Document no. {invoice.number or "-"} - issued '
-                f'{invoice.date.strftime("%d / %m / %Y")}')
-            self.setFont('Helvetica', 7)
-            self.drawString(
-                tx, 18 * mm,
-                'Electronically generated fiscal document - '
-                'valid without a signature.')
+            if is_proforma:
+                # A proforma is a quotation, not a fiscal document: no QR or
+                # verification code - just the disclaimer.
+                self.setFillColor(green)
+                self.setFont(font_b, 9)
+                self.drawString(left, 32.5 * mm, 'PROFORMA - NOT A TAX INVOICE')
+                self.setFillColor(muted)
+                self.setFont(font, 8.5)
+                self.drawString(
+                    left, 27.5 * mm,
+                    'This document is a quotation for the goods/services listed '
+                    'and is not a demand for payment.')
+                self.drawString(
+                    left, 23 * mm,
+                    'A tax invoice will be issued on confirmation of the order.')
+                if invoice.due_date:
+                    self.drawString(
+                        left, 18.5 * mm,
+                        f'Valid until {invoice.due_date.strftime("%d / %m / %Y")}.')
+            else:
+                # Fiscal verification block, bottom-left beside the signature.
+                from reportlab.lib.utils import ImageReader
+                qr_size = 19 * mm
+                self.drawImage(ImageReader(qr_buf), left, 16 * mm,
+                               width=qr_size, height=qr_size, mask='auto')
+                tx = left + qr_size + 4 * mm
+                self.setFillColor(green)
+                self.setFont(font_b, 9)
+                self.drawString(tx, 32.5 * mm, 'FISCAL VERIFICATION')
+                self.setFillColor(colors.black)
+                self.setFont(font_b, 10)
+                self.drawString(tx, 27.5 * mm, f'Verification code: {ver_code}')
+                self.setFillColor(muted)
+                self.setFont(font, 9)
+                self.drawString(
+                    tx, 22.5 * mm,
+                    f'Document no. {invoice.number or "-"} \u00b7 issued '
+                    f'{invoice.date.strftime("%d / %m / %Y")}')
+                self.setFont(font, 8)
+                self.drawString(
+                    tx, 18 * mm,
+                    'Electronically generated fiscal document - '
+                    'valid without a signature.')
 
             line_start = right - 56 * mm
             signature_y = 28 * mm
@@ -1497,25 +1623,27 @@ def invoice_pdf_view(request, pk):
             self.setLineWidth(.65)
             self.line(line_start, signature_y, right, signature_y)
             self.setFillColor(muted)
-            self.setFont('Helvetica', 7)
+            self.setFont(font, 9)
             self.drawCentredString(
                 (line_start + right) / 2, signature_y - 4 * mm,
                 'Authorized signature')
 
-            self.setStrokeColor(colors.HexColor('#e3ebe6'))
+            self.setStrokeColor(line_c)
             self.setLineWidth(.5)
             self.line(18 * mm, 14 * mm, right, 14 * mm)
-            self.setFillColor(dark)
-            self.setFont('Helvetica-Bold', 9)
+            self.setFillColor(green)
+            self.setFont(font_b, 10)
             self.drawCentredString(
                 page_width / 2, 8 * mm, 'Thank you for your business!')
 
     story = []
-    # The letterhead band is drawn full-bleed on the canvas (see
-    # LastPageSignatureCanvas._draw_invoice_header); `contact` feeds it.
-    contact_parts = [f'TIN {farm.tax_id}'] if farm.tax_id else []
-    contact_parts += [p for p in (farm.location, farm.phone, farm.email) if p]
-    contact = ' · '.join(contact_parts)
+    is_proforma = invoice.is_proforma
+    # The letterhead band is drawn on the canvas (see
+    # LastPageSignatureCanvas._draw_invoice_header): contact on one line,
+    # TIN on the next - matching the invoice document template.
+    contact = ' \u00b7 '.join(
+        p for p in (farm.location, farm.phone, farm.email) if p)
+    tin_line = f'TIN: {farm.tax_id}' if farm.tax_id else ''
 
     billed = [
         Paragraph('BILLED TO', label_style),
@@ -1530,17 +1658,19 @@ def invoice_pdf_view(request, pk):
         for line in (invoice.customer.phone, invoice.customer.email):
             if line:
                 billed.append(Paragraph(escape(line), muted_style))
-    details_rows = [[Paragraph('INVOICE DETAILS', label_style), '']]
+    details_rows = [[Paragraph(
+        'PROFORMA DETAILS' if is_proforma else 'INVOICE DETAILS', label_style), '']]
     for key, value in (
-            ('Invoice date', invoice.date.strftime('%d / %m / %Y')),
-            ('Due date', invoice.due_date.strftime('%d / %m / %Y') if invoice.due_date else '-'),
+            ('Date', invoice.date.strftime('%d / %m / %Y')),
+            ('Valid until' if is_proforma else 'Due date',
+             invoice.due_date.strftime('%d / %m / %Y') if invoice.due_date else '-'),
             ('Payment terms', invoice.payment_terms or '-'),
             ('Reference', invoice.reference or '-')):
         details_rows.append([
             Paragraph(escape(key), muted_style),
             Paragraph(escape(value), ParagraphStyle(
                 'DetailValue', parent=muted_style, alignment=2,
-                fontName='Helvetica-Bold', textColor=dark)),
+                fontName=font_b, textColor=colors.black)),
         ])
     details = Table(details_rows, colWidths=[doc.width * .23, doc.width * .20])
     details.setStyle(TableStyle([
@@ -1556,33 +1686,36 @@ def invoice_pdf_view(request, pk):
     story.append(meta)
     story.append(Spacer(1, 9 * mm))
 
-    # Items table
-    data = [['#', 'DESCRIPTION', 'QTY', 'RATE', 'AMOUNT']]
+    # Items table - plain columns, green bold headers over a green rule,
+    # light row separators, matching the invoice document.
+    cur_code = getattr(currency_obj, 'code', '') or 'UGX'
+    data = [[Paragraph('#', head_cell),
+             Paragraph('DESCRIPTION', head_cell),
+             Paragraph('QTY', head_cell_r),
+             Paragraph(f'RATE ({cur_code})', head_cell_r),
+             Paragraph(f'AMOUNT ({cur_code})', head_cell_r)]]
     for line_no, item in enumerate(items, 1):
-        desc = [Paragraph(escape(item.description), cell_bold)]
+        desc = [Paragraph(escape(item.description), cell_style)]
         if item.detail:
             desc.append(Paragraph(escape(item.detail), cell_muted))
         data.append([
-            Paragraph(str(line_no), muted_style),
+            Paragraph(str(line_no), cell_style),
             desc,
             Paragraph(f'{item.quantity:,.2f} {escape(item.unit)}', numeric_style),
             Paragraph(money(item.unit_price), numeric_style),
-            Paragraph(money(item.total), numeric_bold),
+            Paragraph(money(item.total), numeric_style),
         ])
     if not items:
-        data.append(['', 'No line items yet', '', '', ''])
+        data.append(['', Paragraph('No line items yet', cell_style), '', '', ''])
     t = Table(data, colWidths=[
-        doc.width * 0.05, doc.width * 0.42, doc.width * 0.14,
-        doc.width * 0.19, doc.width * 0.20])
+        doc.width * 0.05, doc.width * 0.44, doc.width * 0.14,
+        doc.width * 0.18, doc.width * 0.19])
     t.setStyle(TableStyle([
-        ('LINEBELOW', (0, 0), (-1, 0), 1, dark),
-        ('LINEBELOW', (0, 1), (-1, -2), 0.4, colors.HexColor('#e3ebe6')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), dark),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+        ('LINEBELOW', (0, 0), (-1, 0), 1.5, green),
+        ('LINEBELOW', (0, 1), (-1, -2), 0.5, line_c),
         ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
@@ -1597,7 +1730,10 @@ def invoice_pdf_view(request, pk):
     story.append(Paragraph('TAX SUMMARY', label_style))
     story.append(Spacer(1, 1.5 * mm))
     tax_table = Table(
-        [['Tax Category', 'Gross Amount', 'Tax Amount', 'Net Amount'],
+        [[Paragraph('Tax Category', head_cell),
+          Paragraph('Gross Amount', head_cell_r),
+          Paragraph('Tax Amount', head_cell_r),
+          Paragraph('Net Amount', head_cell_r)],
          [Paragraph(escape(category), cell_style),
           Paragraph(money(invoice.subtotal + invoice.tax_amount), numeric_style),
           Paragraph(money(invoice.tax_amount), numeric_style),
@@ -1605,13 +1741,9 @@ def invoice_pdf_view(request, pk):
         colWidths=[doc.width * 0.40, doc.width * 0.20,
                    doc.width * 0.20, doc.width * 0.20])
     tax_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f4f7f5')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), dark),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BACKGROUND', (0, 0), (-1, 0), shade),
+        ('GRID', (0, 0), (-1, -1), 0.5, line_c),
         ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e3ebe6')),
-        ('LINEBELOW', (0, 0), (-1, 0), 0.8, dark),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ('LEFTPADDING', (0, 0), (-1, -1), 5),
@@ -1626,13 +1758,13 @@ def invoice_pdf_view(request, pk):
     if payment_details:
         for line in payment_details.splitlines():
             if line.strip():
-                pay_block.append(Paragraph(escape(line.strip()), cell_style))
+                pay_block.append(Paragraph(escape(line.strip()), muted_style))
     elif bank:
         pay_rows = Table(
             [[Paragraph(escape(key), muted_style),
               Paragraph(escape(value), ParagraphStyle(
                   'PayValue', parent=cell_style, alignment=2,
-                  fontName='Helvetica-Bold'))]
+                  fontName=font_b))]
              for key, value in (
                  ('Bank', bank.bank_name),
                  ('Account name', bank.name),
@@ -1650,24 +1782,28 @@ def invoice_pdf_view(request, pk):
         pay_block.append(Paragraph(
             'Please contact the farm for payment instructions.', muted_style))
 
-    # Highlight Total Due with color only; keep its type size and weight aligned
-    # with the other summary amounts.
+    # Highlight Total Due with color only; keep its type size and weight
+    # aligned with the other summary amounts.
     total_label = ParagraphStyle(
-        'TotalLabel', parent=cell_style, alignment=0, textColor=primary)
+        'TotalLabel', parent=cell_style, alignment=0, textColor=green)
     total_value = ParagraphStyle(
-        'TotalValue', parent=numeric_style, alignment=2, textColor=primary)
+        'TotalValue', parent=numeric_style, alignment=2, textColor=green)
     totals = [
         [Paragraph('Subtotal', cell_style), Paragraph(money(invoice.subtotal), numeric_style)],
         [Paragraph(f'Tax ({escape(str(invoice.tax_percent or 0))}%)', cell_style),
          Paragraph(money(invoice.tax_amount), numeric_style)],
         [Paragraph('Discount', cell_style), Paragraph(money(invoice.discount or 0), numeric_style)],
-        [Paragraph('TOTAL DUE', total_label), Paragraph(money(invoice.total), total_value)],
-        [Paragraph('Amount paid', cell_style), Paragraph(money(invoice.amount_paid), numeric_style)],
-        [Paragraph('<b>Balance due</b>', cell_style),
-         Paragraph(money(invoice.balance), ParagraphStyle(
-             'BalanceValue', parent=numeric_bold, textColor=colors.HexColor('#b91c1c')))],
+        [Paragraph('ESTIMATED TOTAL' if is_proforma else 'TOTAL DUE', total_label),
+         Paragraph(money(invoice.total), total_value)],
     ]
-    totals_table = Table(totals, colWidths=[doc.width * 0.17, doc.width * 0.19])
+    if not is_proforma:
+        totals += [
+            [Paragraph('Amount paid', cell_style), Paragraph(money(invoice.amount_paid), numeric_style)],
+            [Paragraph('<b>Balance due</b>', cell_style),
+             Paragraph(money(invoice.balance), ParagraphStyle(
+                 'BalanceValue', parent=numeric_bold, textColor=red))],
+        ]
+    totals_table = Table(totals, colWidths=[doc.width * 0.20, doc.width * 0.20])
     totals_table.hAlign = 'RIGHT'
     totals_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
@@ -1678,7 +1814,7 @@ def invoice_pdf_view(request, pk):
         ('RIGHTPADDING', (0, 0), (-1, -1), 3),
     ]))
     bottom = Table([[pay_block, totals_table]],
-                   colWidths=[doc.width * 0.62, doc.width * 0.38])
+                   colWidths=[doc.width * 0.58, doc.width * 0.42])
     bottom.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
     story.append(bottom)
     story.append(Spacer(1, 4 * mm))
@@ -1686,10 +1822,11 @@ def invoice_pdf_view(request, pk):
     cur_label = (getattr(currency_obj, 'name', '') or
                  getattr(currency_obj, 'code', '') or 'UGX')
     story.append(Paragraph(
-        f'<font color="#64748b">Amount due in words:</font> '
-        f'{escape(cur_label)} {escape(_amount_in_words(invoice.total))} only.',
-        ParagraphStyle('InWords', parent=cell_style, fontSize=8,
-                       fontName='Helvetica-Oblique')))
+        f'<font color="#6B7A8D"><i>'
+        f'{"Estimated amount" if is_proforma else "Amount due"} in words:</i></font> '
+        f'<i>{escape(cur_label)} {escape(_amount_in_words(invoice.total))} only.</i>',
+        ParagraphStyle('InWords', parent=cell_style, fontSize=10,
+                       fontName=font_i)))
     story.append(Spacer(1, 7 * mm))
 
     story.append(Paragraph('NOTES & TERMS', label_style))
@@ -1741,9 +1878,32 @@ class InvoicePaymentForm(forms.ModelForm):
 
 
 @login_required
+def invoice_convert_view(request, pk):
+    """Raise a real invoice from a proforma (POST), then open it."""
+    proforma = get_object_or_404(
+        scoped_queryset(Invoice, request.user, write=True), pk=pk)
+    if request.method != 'POST':
+        return HttpResponseRedirect(reverse('invoice_detail', args=[proforma.pk]))
+    if not proforma.is_proforma:
+        return HttpResponseRedirect(reverse('invoice_detail', args=[proforma.pk]))
+    invoice = proforma.convert_to_invoice()
+    messages.success(
+        request, f'Invoice {invoice.number} raised from proforma {proforma.number}.')
+    return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))
+
+
+@login_required
 def invoice_record_payment_view(request, pk):
     invoice = get_object_or_404(
         scoped_queryset(Invoice, request.user, write=True), pk=pk)
+    if invoice.is_proforma:
+        messages.error(
+            request, 'A proforma invoice cannot take payments - convert it to '
+                     'an invoice first.')
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'ok': False, 'redirect': reverse(
+                'invoice_detail', args=[invoice.pk])}, status=400)
+        return HttpResponseRedirect(reverse('invoice_detail', args=[invoice.pk]))
     if request.method == 'POST':
         form = InvoicePaymentForm(request.POST, invoice=invoice)
         if form.is_valid():
@@ -1827,9 +1987,7 @@ def _receipt_pdf_response(farm, *, title, receipt_no, payment_date,
     def money(value):
         return f'{symbol} {value:,.2f}'
 
-    contact_parts = ([f'TIN {farm.tax_id}']
-                     if farm and getattr(farm, 'tax_id', '') else [])
-    contact_parts += [p for p in (
+    contact_parts = [p for p in (
         (farm.location if farm else ''), (farm.phone if farm else ''),
         (farm.email if farm else '')) if p]
     contact = ' \u00b7 '.join(contact_parts)
@@ -1964,11 +2122,13 @@ def _receipt_pdf_response(farm, *, title, receipt_no, payment_date,
             _draw_fiscal_band(
                 self, A4[0], A4[1],
                 farm_name=farm.farm_name if farm else 'FarmLedger Pro',
-                tagline=farm.tagline if farm else '',
-                contact=contact, title=title,
+                contact=contact,
+                tin=(f'TIN: {farm.tax_id}'
+                     if farm and getattr(farm, 'tax_id', '') else ''),
+                title=title,
                 subtitle=f'No. {receipt_no}',
-                logo_path=farm.logo.path
-                          if farm and getattr(farm, 'logo', None) else None)
+                logo_path=(farm.logo.path
+                           if farm and getattr(farm, 'logo', None) else None))
 
         def _draw_footer(self):
             from reportlab.lib.utils import ImageReader

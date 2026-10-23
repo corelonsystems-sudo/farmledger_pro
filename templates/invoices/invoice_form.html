@@ -28,7 +28,7 @@
 
 {% block content %}
 <div class="inv-form-card">
-    <h2>{{ action }} Invoice{% if invoice.number %} {{ invoice.number }}{% endif %}</h2>
+    <h2>{{ action }} {{ doc_label|default:"Invoice" }}{% if invoice.number %} {{ invoice.number }}{% endif %}</h2>
     <form method="post">
         {% csrf_token %}
         {% if form.non_field_errors %}<ul class="errorlist">{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}

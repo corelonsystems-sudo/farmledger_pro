@@ -1,0 +1,215 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ equipment.name }} - FarmLedger Pro{% endblock %}
+{% block nav_equipment %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">Equipment</a> &rsaquo; {{ equipment.name }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+<style>
+    .budget-toolbar { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:20px; padding:24px; border:1px solid #2d6a4f; border-radius:14px; background:linear-gradient(115deg,#163c2b,#24593f); box-shadow:0 8px 22px rgba(27,67,50,.12); color:white; }
+    .budget-header-identity { display:flex; align-items:center; gap:18px; min-width:0; flex:1; }
+    .budget-avatar { display:grid; place-items:center; flex-shrink:0; width:66px; height:66px; background:#fff; color:#1b4332; border:1px solid #d8e7dc; border-radius:14px; }
+    .budget-avatar svg { width:34px; height:34px; }
+    .budget-header-copy { min-width:0; }
+    .budget-eyebrow { color:#b7d8c4; font-size:.65rem; text-transform:uppercase; letter-spacing:.12em; font-weight:700; margin:0 0 7px; }
+    .budget-toolbar h1 { margin:0; font-size:clamp(1.2rem,2vw,1.65rem); line-height:1.25; font-weight:700; color:white; overflow-wrap:anywhere; }
+    .budget-header-subtitle { margin:6px 0 10px; color:#dcece2; font-size:.83rem; overflow-wrap:anywhere; }
+    .budget-header-meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:12px; }
+    .budget-header-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid rgba(255,255,255,.2); border-radius:6px; font-size:.68rem; color:#eff7f1; background:rgba(255,255,255,.07); }
+    .budget-header-status { padding:5px 10px; border-radius:6px; font-size:.68rem; font-weight:700; }
+    .budget-header-status.active { background:#d5f4df; color:#14532d; }
+    .budget-header-status.inactive { background:#e2e8f0; color:#475569; }
+    .budget-toolbar .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; max-width:420px; }
+    .budget-toolbar .btn-primary { background:#fff; border:1px solid #fff; color:#1b4332; }
+    .budget-toolbar .btn-primary:hover { background:#e4f1e9; }
+    .budget-toolbar .btn-secondary { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.35); color:#fff; }
+    .budget-toolbar .btn-secondary:hover { background:rgba(255,255,255,.17); }
+    .budget-back { width:100%; text-align:right; color:#d3e7db; font-size:.72rem; text-decoration:none; margin-bottom:2px; }
+    .budget-back:hover { color:white; text-decoration:underline; }
+    .budget-paper { background:white; border:1px solid #ccd5d0; border-radius:10px; padding:22px; }
+    .budget-tabs { display:flex; gap:6px; overflow-x:auto; border-bottom:1px solid #dce5ed; margin:0 0 20px; }
+    .budget-tab { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; border:0; border-bottom:3px solid transparent; background:transparent; padding:12px 16px; color:#7a8b9d; font:inherit; font-size:.8rem; cursor:pointer; white-space:nowrap; }
+    .budget-tab svg { width:15px; height:15px; flex-shrink:0; }
+    .budget-tab:hover { color:#1677ff; background:#f5f9ff; }
+    .budget-tab[aria-selected="true"] { color:#1677ff; border-bottom-color:#1677ff; }
+    .budget-tab:focus-visible { outline:2px solid #1677ff; outline-offset:-3px; }
+    .budget-tab-panel[hidden] { display:none!important; }
+    .tab-badge { background:#e8f0ea; color:#1b4332; border-radius:10px; padding:1px 8px; font-size:.66rem; font-weight:700; }
+    .eq-overview-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; }
+    .eq-card { background:#f7faf8; border:1px solid #d4dcd7; border-radius:10px; padding:18px; }
+    .eq-card h3 { margin:0 0 14px; color:#1b4332; font-size:.9rem; }
+    .eq-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px solid #e3ebe6; font-size:.8rem; }
+    .eq-row:last-child { border-bottom:0; }
+    .eq-row span { color:#64748b; }
+    .eq-row strong { text-align:right; color:#1f2937; }
+    .eq-row strong.total { color:#1b4332; font-size:.9rem; }
+    .eq-quick { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+    .panel { margin-bottom:16px; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:14px; }
+    .panel-head h3 { margin:0; color:var(--primary-dark); font-weight:700; font-size:.95rem; }
+    .panel-head .head-actions { display:flex; gap:8px; align-items:center; }
+    @media(max-width:1000px) { .budget-toolbar { flex-direction:column; align-items:flex-start; gap:18px; } .budget-toolbar .actions { max-width:none; justify-content:flex-start; width:100%; } .budget-back { text-align:left; } }
+    @media(max-width:720px) { .eq-overview-grid { grid-template-columns:1fr; } }
+    @media(max-width:600px) { .budget-toolbar { padding:18px; } .budget-header-identity { gap:12px; align-items:flex-start; } .budget-avatar { width:48px; height:48px; border-radius:10px; } .budget-avatar svg { width:26px; height:26px; } }
+    @media print {
+        .sidebar,.topbar,.budget-toolbar .actions,.no-print { display:none!important; }
+        .main { margin:0; padding:0; }
+        .budget-toolbar { background:white; box-shadow:none; border:0; border-bottom:2px solid #1b4332; border-radius:0; padding:0 0 14px; color:#1b4332; }
+        .budget-toolbar h1,.budget-eyebrow,.budget-header-subtitle,.budget-header-tag { color:#1b4332; }
+        .budget-header-tag,.budget-header-status { background:white; border-color:#ccd5d0; }
+        .budget-paper { border:0; padding:0; }
+        .budget-tabs { display:none!important; }
+        .budget-tab-panel[hidden] { display:block!important; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="eq-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="14" height="10" rx="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M16 10h4l2 4v4h-6"/></svg></div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Equipment</p>
+            <h1 id="eq-page-title">{{ equipment.name }}</h1>
+            <p class="budget-header-subtitle">{{ equipment.farm_profile.farm_name }} equipment</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {% if equipment.is_active %}active{% else %}inactive{% endif %}">{% if equipment.is_active %}Active{% else %}Inactive{% endif %}</span>
+                <span class="budget-header-tag">{{ equipment.get_equipment_type_display }}</span>
+                <span class="budget-header-tag">{{ equipment.hours_used }}h used</span>
+                {% if equipment.current_value %}<span class="budget-header-tag">Value {{ equipment.current_value|as_currency:currency }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ urls.list }}">&larr; Back to Equipment</a>
+        {% if can_write %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_maint_url }}&amp;next={{ request.path }}" data-modal-title="Log Maintenance">+ Maintenance</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_usage_url }}&amp;next={{ request.path }}" data-modal-title="Log Usage">+ Usage</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit Equipment">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete Equipment">Delete</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="kpi-grid">
+    {% for stat in stats %}
+    <div class="kpi-card">
+        <div class="kpi-icon {{ stat.color|default:'green' }}">
+            {% if stat.icon == 'money' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            {% elif stat.icon == 'clock' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            {% elif stat.icon == 'layers' %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>{% endif %}
+        </div>
+        <div>
+            <div class="kpi-value">{{ stat.value }}</div>
+            <div class="kpi-label">{{ stat.label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Equipment sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-eq-overview" aria-selected="true" aria-controls="eq-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-eq-maint" aria-selected="false" aria-controls="eq-maint" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>MAINTENANCE <span class="tab-badge">{{ equipment.maintenance_logs.count }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-eq-usage" aria-selected="false" aria-controls="eq-usage" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>USAGE <span class="tab-badge">{{ equipment.usage_records.count }}</span></button>
+</nav>
+
+<section class="budget-tab-panel" id="eq-overview" role="tabpanel" aria-labelledby="tab-eq-overview" tabindex="0">
+    <div class="eq-overview-grid">
+        <article class="eq-card">
+            <h3>Equipment Details</h3>
+            {% for row in info_rows %}
+            <div class="eq-row"><span>{{ row.label }}</span>
+                <strong>
+                    {% if row.kind == 'pill' %}<span class="pill-badge pill-{{ row.pill }}">{{ row.value }}</span>
+                    {% elif row.kind == 'money' %}{{ row.value|as_currency:currency }}
+                    {% else %}{{ row.value|default:'-' }}{% endif %}
+                </strong>
+            </div>
+            {% endfor %}
+        </article>
+        <article class="eq-card">
+            <h3>Cost of Ownership</h3>
+            {% for row in cost_rows %}
+            <div class="eq-row"><span>{{ row.label }}</span>
+                <strong class="{% if row.label == 'Total Cost of Ownership' %}total{% endif %}">
+                    {% if row.kind == 'money' %}{{ row.value|as_currency:currency }}
+                    {% else %}{{ row.value|default:'-' }}{% endif %}
+                </strong>
+            </div>
+            {% endfor %}
+            <div class="eq-row"><span>Hours from log</span><strong>{{ logged_hours }}h</strong></div>
+            {% if can_write %}
+            <div class="eq-quick no-print">
+                <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ new_maint_url }}&amp;next={{ request.path }}" data-modal-title="Log Maintenance">+ Maintenance</a>
+                <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_usage_url }}&amp;next={{ request.path }}" data-modal-title="Log Usage">+ Usage</a>
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="eq-maint" role="tabpanel" aria-labelledby="tab-eq-maint" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ maint_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_maint_url }}&amp;next={{ request.path }}" data-modal-title="Log Maintenance">+ Add</a>{% endif %}
+                <a class="action-btn" href="{{ maint_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=maint_table %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="eq-usage" role="tabpanel" aria-labelledby="tab-eq-usage" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>{{ usage_table.title }}</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_usage_url }}&amp;next={{ request.path }}" data-modal-title="Log Usage">+ Log use</a>{% endif %}
+                <a class="action-btn" href="{{ usage_table.list_url }}">View all</a>
+            </div>
+        </div>
+        {% include "dashboard/table_panel.html" with table=usage_table %}
+    </div>
+</section>
+</div>
+
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
+{% endblock %}

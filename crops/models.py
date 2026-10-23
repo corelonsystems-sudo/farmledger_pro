@@ -102,6 +102,9 @@ class CropSeason(models.Model):
     )
     variety = models.CharField(max_length=100, blank=True, default='')
     planting_date = models.DateField()
+    plants_count = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='Number of plants/trees/crops planted on this field for this season.')
     expected_yield = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True,
         help_text='Expected harvest quantity in the crop primary unit (for planned vs actual yield).')
@@ -169,6 +172,13 @@ class CropSeason(models.Model):
     def yield_per_acre(self):
         if self.field_id and self.field.acreage:
             return self.total_harvest_quantity / self.field.acreage
+        return None
+
+    @property
+    def yield_per_plant(self):
+        """Average harvest quantity per plant/tree, when a plant count is recorded."""
+        if self.plants_count:
+            return self.total_harvest_quantity / self.plants_count
         return None
 
     @property
@@ -736,11 +746,23 @@ class Invoice(models.Model):
         PAID = 'PAID', 'Paid'
         CANCELLED = 'CANCELLED', 'Cancelled'
 
+    class Kind(models.TextChoices):
+        INVOICE = 'INVOICE', 'Invoice'
+        PROFORMA = 'PROFORMA', 'Proforma invoice'
+
     farm_profile = models.ForeignKey(
         'accounts.FarmProfile',
         on_delete=models.CASCADE,
         related_name='invoices',
     )
+    kind = models.CharField(
+        max_length=10, choices=Kind.choices, default=Kind.INVOICE,
+        help_text='A proforma is a quotation: it is not a fiscal document and '
+                  'takes no payments until converted to an invoice.')
+    converted_invoice = models.OneToOneField(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='source_proforma',
+        help_text='Invoice raised from this proforma.')
     number = models.CharField(max_length=20, unique=True, blank=True, default='')
     customer = models.ForeignKey(
         Customer,
@@ -816,6 +838,44 @@ class Invoice(models.Model):
     def balance(self):
         return max(self.total - self.amount_paid, Decimal('0'))
 
+    @property
+    def is_proforma(self):
+        return self.kind == self.Kind.PROFORMA
+
+    @property
+    def document_title(self):
+        return 'PROFORMA INVOICE' if self.is_proforma else 'INVOICE'
+
+    def convert_to_invoice(self):
+        """Raise a real invoice from this proforma (items copied, linked back).
+
+        Idempotent: returns the existing converted invoice when already done.
+        """
+        if not self.is_proforma:
+            return self
+        if self.converted_invoice_id:
+            return self.converted_invoice
+        from django.db import transaction
+        with transaction.atomic():
+            from datetime import date as _date
+            invoice = Invoice(
+                farm_profile=self.farm_profile, customer=self.customer,
+                buyer=self.buyer, date=_date.today(), due_date=None,
+                payment_terms=self.payment_terms, reference=self.reference,
+                tax_percent=self.tax_percent, discount=self.discount,
+                payment_details=self.payment_details, notes=self.notes,
+                kind=self.Kind.INVOICE, status=self.Status.ISSUED)
+            invoice.save()
+            for item in self.items.all():
+                InvoiceItem.objects.create(
+                    invoice=invoice, description=item.description,
+                    detail=item.detail, quantity=item.quantity,
+                    unit=item.unit, unit_price=item.unit_price,
+                    unit_cost=item.unit_cost)
+            self.converted_invoice = invoice
+            Invoice.objects.filter(pk=self.pk).update(converted_invoice=invoice)
+        return invoice
+
     def clean(self):
         errors = {}
         if self.customer_id:
@@ -832,16 +892,22 @@ class Invoice(models.Model):
             self.buyer = self.customer.name
         if not self.number:
             import re
+            prefix = 'PRO' if self.is_proforma else 'INV'
             numbers = Invoice.objects.values_list('number', flat=True)
             seq = [int(m.group(1)) for n in numbers
-                   if (m := re.match(r'INV-(\d+)$', n or ''))]
-            self.number = f'INV-{max(seq, default=0) + 1:05d}'
+                   if (m := re.match(rf'{prefix}-(\d+)$', n or ''))]
+            self.number = f'{prefix}-{max(seq, default=0) + 1:05d}'
         super().save(*args, **kwargs)
         self.refresh_status()
 
     def refresh_status(self):
-        """Derive payment status from recorded payments (drafts excluded)."""
-        if self.status in (self.Status.DRAFT, self.Status.CANCELLED):
+        """Derive payment status from recorded payments.
+
+        Drafts, cancelled invoices and proformas (which take no payments)
+        keep their status as set.
+        """
+        if self.is_proforma or self.status in (
+                self.Status.DRAFT, self.Status.CANCELLED):
             return
         paid = self.amount_paid
         if paid <= 0:
