@@ -1,0 +1,100 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}Payroll {{ run.start_date }} → {{ run.end_date }} - FarmLedger Pro{% endblock %}
+{% block nav_payroll %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">Payroll</a> &rsaquo; {{ run.start_date }} → {{ run.end_date }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+{% include "dashboard/record_toolbar_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="pr-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Payroll Run</p>
+            <h1 id="pr-page-title">{{ run.start_date }} → {{ run.end_date }}</h1>
+            <p class="budget-header-subtitle">{{ run.farm_profile.farm_name }} payroll</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {% if run.status == 'COMPLETED' %}active{% elif run.status == 'FAILED' %}bad{% else %}warn{% endif %}">{{ run.get_status_display }}</span>
+                <span class="budget-header-tag">{{ lines|length }} worker{{ lines|length|pluralize }}</span>
+                <span class="budget-header-tag">{{ run.total_amount|as_currency:currency }}</span>
+                {% if run.budget_item_id %}<span class="budget-header-tag">{{ run.budget_item }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ urls.list }}">&larr; Back to Payroll</a>
+        {% if can_write %}
+        {% if run.status != 'COMPLETED' %}<form method="post" action="{{ generate_url }}">{% csrf_token %}<button class="btn-post" type="submit">Generate from Attendance</button></form>{% endif %}
+        {% if run.status == 'PENDING' and lines %}<form method="post" action="{{ complete_url }}" onsubmit="return confirm('Mark this payroll run as completed?');">{% csrf_token %}<button class="btn-post" type="submit">Mark Completed</button></form>{% endif %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit Payroll Run">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete Payroll Run">Delete</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div><div><div class="kpi-value">{{ lines|length }}</div><div class="kpi-label">Workers Paid</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div><div class="kpi-value">{{ total_hours }}h</div><div class="kpi-label">Total Hours</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div><div class="kpi-value">{{ total_ot }}h</div><div class="kpi-label">Overtime</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div><div class="kpi-value">{{ run.total_amount|as_currency:currency }}</div><div class="kpi-label">Total Amount</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon {% if posted_expenses == lines|length %}green{% else %}amber{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div><div><div class="kpi-value">{{ posted_expenses }}/{{ lines|length }}</div><div class="kpi-label">Expenses Posted</div></div></div>
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Payroll sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-pr-overview" aria-selected="true" aria-controls="pr-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-pr-lines" aria-selected="false" aria-controls="pr-lines" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 7h13M8 12h13M8 17h13M3 7h.01M3 12h.01M3 17h.01"/></svg>PAYROLL LINES <span class="tab-badge">{{ lines|length }}</span></button>
+</nav>
+
+<section class="budget-tab-panel" id="pr-overview" role="tabpanel" aria-labelledby="tab-pr-overview" tabindex="0">
+    <div class="eq-overview-grid">
+        <article class="eq-card">
+            <h3>Run Details</h3>
+            <div class="eq-row"><span>Period</span><strong>{{ run.start_date }} → {{ run.end_date }}</strong></div>
+            <div class="eq-row"><span>Status</span><strong><span class="pill-badge pill-{% if run.status == 'COMPLETED' %}green{% elif run.status == 'FAILED' %}red{% else %}amber{% endif %}">{{ run.get_status_display }}</span></strong></div>
+            <div class="eq-row"><span>Budget Item</span><strong>{{ run.budget_item|default:'-' }}</strong></div>
+            <div class="eq-row"><span>Created</span><strong>{{ run.created_at.date }}</strong></div>
+        </article>
+        <article class="eq-card">
+            <h3>Totals</h3>
+            <div class="eq-row"><span>Workers</span><strong>{{ lines|length }}</strong></div>
+            <div class="eq-row"><span>Regular Hours</span><strong>{{ total_hours }}h</strong></div>
+            <div class="eq-row"><span>Overtime</span><strong>{{ total_ot }}h</strong></div>
+            <div class="eq-row"><span>Expenses Posted to Ledger</span><strong>{{ posted_expenses }} of {{ lines|length }}</strong></div>
+            <div class="eq-row"><span>Total</span><strong class="total">{{ run.total_amount|as_currency:currency }}</strong></div>
+            {% if can_write %}
+            <div class="eq-quick no-print">
+                {% if run.status != 'COMPLETED' %}<form method="post" action="{{ generate_url }}">{% csrf_token %}<button class="btn btn-primary" type="submit">Generate from Attendance</button></form>{% endif %}
+                {% if run.status == 'PENDING' and lines %}<form method="post" action="{{ complete_url }}" onsubmit="return confirm('Mark this payroll run as completed?');">{% csrf_token %}<button class="btn btn-primary" type="submit">Mark Completed</button></form>{% endif %}
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="pr-lines" role="tabpanel" aria-labelledby="tab-pr-lines" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head"><h3>Payroll Lines</h3></div>
+        {% if lines %}
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Worker</th><th class="num">Rate</th><th class="num">Hours</th><th class="num">Overtime</th><th>Budget Item</th><th class="num">Amount</th><th>Expense</th></tr></thead><tbody>
+            {% for l in lines %}<tr>
+                <td><a class="link" href="{% url 'worker_detail' l.worker_id %}">{{ l.worker.name }}</a></td>
+                <td class="num">{{ l.worker.hourly_rate|as_currency:currency }}/hr</td>
+                <td class="num">{{ l.hours }}h</td>
+                <td class="num">{% if l.overtime_hours %}{{ l.overtime_hours }}h{% else %}-{% endif %}</td>
+                <td>{% if l.budget_item_id %}{{ l.budget_item }}{% elif run.budget_item_id %}{{ run.budget_item }} <span style="color:#94a3b8;">(run)</span>{% else %}-{% endif %}</td>
+                <td class="num">{{ l.amount|as_currency:currency }}</td>
+                <td>{% if l.expense %}<span class="pill-badge pill-green">Posted</span>{% else %}<span class="pill-badge pill-slate">Not posted</span>{% endif %}</td>
+            </tr>{% endfor %}
+        </tbody></table></div>
+        {% else %}<div class="empty-state"><p>No lines yet — generate them from attendance.</p></div>{% endif %}
+    </div>
+</section>
+</div>
+{% include "dashboard/record_tabs_js.html" %}
+{% endblock %}

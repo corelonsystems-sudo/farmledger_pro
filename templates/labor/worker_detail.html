@@ -1,0 +1,155 @@
+{% extends "dashboard/base.html" %}
+{% load currency_tags %}
+{% block title %}{{ worker.name }} - FarmLedger Pro{% endblock %}
+{% block nav_workers %}active{% endblock %}
+{% block breadcrumbs %}<a href="{{ urls.list }}">Workers</a> &rsaquo; {{ worker.name }}{% endblock %}
+
+{% block extra_head %}
+{% include "dashboard/list_page_styles.html" %}
+{% include "dashboard/detail_page_styles.html" %}
+{% include "dashboard/record_toolbar_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<header class="budget-toolbar" aria-labelledby="wk-page-title">
+    <div class="budget-header-identity">
+        <div class="budget-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+        <div class="budget-header-copy">
+            <p class="budget-eyebrow">Worker</p>
+            <h1 id="wk-page-title">{{ worker.name }}</h1>
+            <p class="budget-header-subtitle">{{ worker.farm_profile.farm_name }} worker</p>
+            <div class="budget-header-meta">
+                <span class="budget-header-status {% if worker.is_active %}active{% else %}inactive{% endif %}">{% if worker.is_active %}Active{% else %}Inactive{% endif %}</span>
+                <span class="budget-header-tag">{{ worker.hourly_rate|as_currency:currency }}/hr</span>
+                {% if worker.phone %}<span class="budget-header-tag">{{ worker.phone }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="actions">
+        <a class="budget-back" href="{{ urls.list }}">&larr; Back to Workers</a>
+        {% if can_write %}
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ new_attendance_url }}&amp;next={{ request.path }}" data-modal-title="Log Attendance">+ Attendance</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.edit }}?next={{ request.path }}" data-modal-title="Edit Worker">Edit</a>
+        <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ urls.delete }}" data-modal-title="Delete Worker">Delete</a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div><div class="kpi-value">{{ worker.hourly_rate|as_currency:currency }}/hr</div><div class="kpi-label">Hourly Rate</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div><div class="kpi-value">{{ month_stats.hours }}h</div><div class="kpi-label">Month Hours</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div><div class="kpi-value">{{ month_stats.ot }}h</div><div class="kpi-label">Month Overtime</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div><div class="kpi-value">{{ month_pay|as_currency:currency }}</div><div class="kpi-label">Month Pay (est.)</div></div></div>
+    <div class="kpi-card"><div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><div><div class="kpi-value">{{ tasks|length }}</div><div class="kpi-label">Tasks</div></div></div>
+</div>
+
+<div class="budget-paper">
+<nav class="budget-tabs" role="tablist" aria-label="Worker sections">
+    <button type="button" class="budget-tab" role="tab" id="tab-wk-overview" aria-selected="true" aria-controls="wk-overview" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>OVERVIEW</button>
+    <button type="button" class="budget-tab" role="tab" id="tab-wk-attendance" aria-selected="false" aria-controls="wk-attendance" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>ATTENDANCE <span class="tab-badge">{{ attendance|length }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-wk-tasks" aria-selected="false" aria-controls="wk-tasks" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>TASKS <span class="tab-badge">{{ tasks|length }}</span></button>
+    <button type="button" class="budget-tab" role="tab" id="tab-wk-pay" aria-selected="false" aria-controls="wk-pay" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>PAY &amp; EQUIPMENT <span class="tab-badge">{{ payroll_lines|length }}</span></button>
+</nav>
+
+<section class="budget-tab-panel" id="wk-overview" role="tabpanel" aria-labelledby="tab-wk-overview" tabindex="0">
+    <div class="eq-overview-grid">
+        <article class="eq-card">
+            <h3>Worker Details</h3>
+            <div class="eq-row"><span>Hourly Rate</span><strong>{{ worker.hourly_rate|as_currency:currency }}</strong></div>
+            <div class="eq-row"><span>Phone</span><strong>{{ worker.phone|default:'-' }}</strong></div>
+            <div class="eq-row"><span>Tax ID</span><strong>{{ worker.tax_id|default:'-' }}</strong></div>
+            <div class="eq-row"><span>Linked User</span><strong>{{ worker.user.username|default:'-' }}</strong></div>
+            <div class="eq-row"><span>Status</span><strong>{% if worker.is_active %}<span class="pill-badge pill-green">Active</span>{% else %}<span class="pill-badge pill-slate">Inactive</span>{% endif %}</strong></div>
+        </article>
+        <article class="eq-card">
+            <h3>Work Summary</h3>
+            <div class="eq-row"><span>All-time Hours</span><strong>{{ all_stats.hours }}h</strong></div>
+            <div class="eq-row"><span>All-time Overtime</span><strong>{{ all_stats.ot }}h</strong></div>
+            <div class="eq-row"><span>This Month</span><strong>{{ month_stats.hours }}h + {{ month_stats.ot }}h OT</strong></div>
+            <div class="eq-row"><span>This Month Pay (est.)</span><strong>{{ month_pay|as_currency:currency }}</strong></div>
+            <div class="eq-row"><span>Total Paid (payroll)</span><strong class="total">{{ total_paid|as_currency:currency }}</strong></div>
+            {% if can_write %}
+            <div class="eq-quick no-print">
+                <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ new_attendance_url }}&amp;next={{ request.path }}" data-modal-title="Log Attendance">+ Attendance</a>
+            </div>
+            {% endif %}
+        </article>
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="wk-attendance" role="tabpanel" aria-labelledby="tab-wk-attendance" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>Attendance</h3>
+            <div class="head-actions">
+                {% if can_write %}<a class="action-btn no-print" href="javascript:void(0)" data-modal-url="{{ new_attendance_url }}&amp;next={{ request.path }}" data-modal-title="Log Attendance">+ Add</a>{% endif %}
+                <a class="action-btn" href="{% url 'model_list' app='labor' model='attendancerecord' %}">View all</a>
+            </div>
+        </div>
+        {% if attendance %}
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Task</th><th class="num">Hours</th><th class="num">Overtime</th><th class="num">Pay</th></tr></thead><tbody>
+            {% for r in attendance %}<tr>
+                <td>{{ r.date }}</td>
+                <td>{% if r.task_id %}<a class="link" href="{% url 'task_detail' r.task_id %}">{{ r.task.name }}</a>{% else %}-{% endif %}</td>
+                <td class="num">{{ r.hours }}h</td>
+                <td class="num">{% if r.overtime_hours %}{{ r.overtime_hours }}h{% else %}-{% endif %}</td>
+                <td class="num">{{ r.total_pay|as_currency:currency }}</td>
+            </tr>{% endfor %}
+        </tbody></table></div>
+        {% else %}<div class="empty-state"><p>No attendance logged.</p></div>{% endif %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="wk-tasks" role="tabpanel" aria-labelledby="tab-wk-tasks" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>Assigned Tasks</h3>
+            <div class="head-actions"><a class="action-btn" href="{% url 'model_list' app='labor' model='task' %}">View all</a></div>
+        </div>
+        {% if tasks %}
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Task</th><th>Window</th><th>Status</th></tr></thead><tbody>
+            {% for t in tasks %}<tr>
+                <td><a class="link" href="{% url 'task_detail' t.pk %}">{{ t.name }}</a></td>
+                <td>{% if t.start_date and t.end_date %}{{ t.start_date }} → {{ t.end_date }}{% else %}-{% endif %}</td>
+                <td><span class="pill-badge pill-{% if t.status == 'COMPLETED' %}green{% elif t.status == 'IN_PROGRESS' %}amber{% else %}slate{% endif %}">{{ t.get_status_display }}</span></td>
+            </tr>{% endfor %}
+        </tbody></table></div>
+        {% else %}<div class="empty-state"><p>No tasks assigned.</p></div>{% endif %}
+    </div>
+</section>
+
+<section class="budget-tab-panel" id="wk-pay" role="tabpanel" aria-labelledby="tab-wk-pay" tabindex="0" hidden>
+    <div class="panel">
+        <div class="panel-head">
+            <h3>Payroll History</h3>
+            <div class="head-actions"><a class="action-btn" href="{% url 'model_list' app='labor' model='payrollrun' %}">View all</a></div>
+        </div>
+        {% if payroll_lines %}
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Period</th><th class="num">Hours</th><th class="num">Overtime</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>
+            {% for l in payroll_lines %}<tr>
+                <td><a class="link" href="{% url 'payrollrun_detail' l.payroll_run_id %}">{{ l.payroll_run.start_date }} → {{ l.payroll_run.end_date }}</a></td>
+                <td class="num">{{ l.hours }}h</td>
+                <td class="num">{% if l.overtime_hours %}{{ l.overtime_hours }}h{% else %}-{% endif %}</td>
+                <td class="num">{{ l.amount|as_currency:currency }}</td>
+                <td><span class="pill-badge pill-{% if l.payroll_run.status == 'COMPLETED' %}green{% else %}amber{% endif %}">{{ l.payroll_run.get_status_display }}</span></td>
+            </tr>{% endfor %}
+        </tbody></table></div>
+        {% else %}<div class="empty-state"><p>No payroll entries yet.</p></div>{% endif %}
+    </div>
+    {% if equipment_usage %}
+    <div class="panel" style="margin-top:20px;">
+        <div class="panel-head"><h3>Equipment Operated</h3></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Equipment</th><th class="num">Hours</th><th>Work</th></tr></thead><tbody>
+            {% for u in equipment_usage %}<tr>
+                <td>{{ u.date }}</td>
+                <td><a class="link" href="{% url 'equipment_detail' u.equipment_id %}">{{ u.equipment.name }}</a></td>
+                <td class="num">{{ u.hours }}h</td>
+                <td>{{ u.description|truncatechars:60|default:'-' }}</td>
+            </tr>{% endfor %}
+        </tbody></table></div>
+    </div>
+    {% endif %}
+</section>
+</div>
+{% include "dashboard/record_tabs_js.html" %}
+{% endblock %}

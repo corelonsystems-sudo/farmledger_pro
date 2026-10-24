@@ -3204,137 +3204,80 @@ def equipment_detail_view(request, pk):
 def inventory_item_detail_view(request, pk):
     from inventory.models import InventoryItem
     obj = get_object_or_404(
-        scoped_queryset(InventoryItem, request.user), pk=pk)
-    txns = obj.transactions.select_related('budget_item').order_by('-date', '-created_at')[:15]
+        scoped_queryset(InventoryItem, request.user)
+        .select_related('farm_profile'), pk=pk)
+    txns = (obj.transactions
+            .select_related('budget_item', 'budget_item__subcode', 'crop_season')
+            .order_by('-date', '-created_at')[:15])
     alerts = obj.alerts.order_by('-created_at')[:10]
-    info_groups = [{
-        'title': 'Item',
-        'rows': [
-            {'label': 'Unit', 'value': obj.unit},
-            {'label': 'On Hand', 'value': f'{obj.quantity_on_hand} {obj.unit}'},
-            {'label': 'Reorder Threshold', 'value': f'{obj.reorder_threshold} {obj.unit}'},
-            {'label': 'Stock Status', 'value': 'Low Stock' if obj.is_low_stock else 'In Stock',
-             'kind': 'pill', 'pill': 'red' if obj.is_low_stock else 'green'},
-            {'label': 'Cost / Unit', 'value': obj.cost_per_unit, 'kind': 'money'},
-            {'label': 'Supplier', 'value': obj.supplier},
-        ],
-    }]
-    tables = [
-        {
-            'title': 'Stock Transactions',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'type', 'label': 'Type'},
-                {'key': 'qty', 'label': 'Qty', 'class': 'num'},
-                {'key': 'unit_cost', 'label': 'Unit Cost', 'class': 'num'},
-                {'key': 'notes', 'label': 'Notes'},
-            ],
-            'rows': _table_rows(txns, lambda t: {
-                'date': t.date,
-                'type': _pill(t.get_transaction_type_display(),
-                              {'PURCHASE': 'green', 'USAGE': 'amber'}.get(t.transaction_type, 'slate')),
-                'qty': f'{t.quantity} {obj.unit}',
-                'unit_cost': _money(t.unit_cost), 'notes': t.notes[:60],
-            }),
-            'list_url': reverse('model_list', args=['inventory', 'inventorytransaction']),
-            'empty': 'No stock movements.',
-        },
-        {
-            'title': 'Alerts',
-            'columns': [
-                {'key': 'created', 'label': 'Raised'},
-                {'key': 'message', 'label': 'Message'},
-                {'key': 'status', 'label': 'Status'},
-            ],
-            'rows': _table_rows(alerts, lambda a: {
-                'created': a.created_at.date(), 'message': a.message,
-                'status': _pill('Resolved', 'green') if a.is_resolved else _pill('Open', 'red'),
-            }),
-            'list_url': reverse('model_list', args=['inventory', 'inventoryalert']),
-            'empty': 'No alerts for this item.',
-        },
-    ]
-    return _record_detail(
-        request, 'inventory', 'inventoryitem', obj, title=obj.name,
-        subtitle=f'{obj.farm_profile.farm_name} inventory', nav='inventoryitem',
-        status_pill={'text': 'Low Stock', 'color': 'red'} if obj.is_low_stock
-        else {'text': 'In Stock', 'color': 'green'},
-        stats=[
-            {'label': 'On Hand', 'value': f'{obj.quantity_on_hand} {obj.unit}', 'icon': 'layers', 'color': 'green'},
-            {'label': 'Stock Value', 'value': obj.quantity_on_hand * obj.cost_per_unit, 'icon': 'money', 'color': 'blue'},
-            {'label': 'Open Alerts', 'value': obj.alerts.filter(is_resolved=False).count(), 'icon': 'alert', 'color': 'red'},
-            {'label': 'Transactions', 'value': obj.transactions.count(), 'icon': 'clock', 'color': 'teal'},
-        ],
-        info_groups=info_groups, tables=tables, list_label='Inventory')
+    txn_stats = obj.transactions.aggregate(
+        purchased=Coalesce(Sum('quantity', filter=Q(transaction_type='PURCHASE')),
+                         0, output_field=DecimalField()),
+        used=Coalesce(Sum('quantity', filter=Q(transaction_type='USAGE')),
+                      0, output_field=DecimalField()),
+        spend=Coalesce(Sum('expense__amount'), 0, output_field=DecimalField()),
+    )
+    context = {
+        'item': obj,
+        'nav': 'inventoryitem',
+        'txns': txns,
+        'alerts': alerts,
+        'txn_stats': txn_stats,
+        'stock_value': obj.quantity_on_hand * obj.cost_per_unit,
+        'open_alerts': obj.alerts.filter(is_resolved=False).count(),
+        'txn_count': obj.transactions.count(),
+        'can_write': _can_write(request.user, 'inventory.inventoryitem'),
+        'urls': _crud_urls('inventory', 'inventoryitem', pk=obj.pk),
+        'new_txn_url': f"{reverse('model_create', kwargs={'app': 'inventory', 'model': 'inventorytransaction'})}?item={obj.pk}",
+    }
+    return render(request, 'inventory/item_detail.html', context)
 
 
 @login_required
 def worker_detail_view(request, pk):
     from labor.models import Worker
     obj = get_object_or_404(
-        scoped_queryset(Worker, request.user).prefetch_related('tasks'), pk=pk)
+        scoped_queryset(Worker, request.user)
+        .select_related('farm_profile', 'user')
+        .prefetch_related('tasks'), pk=pk)
     attendance = obj.attendance_records.select_related('task').order_by('-date')[:15]
     tasks = list(obj.tasks.order_by('-start_date')[:10])
+    payroll_lines = (obj.payroll_lines
+                     .select_related('payroll_run')
+                     .order_by('-payroll_run__end_date')[:10])
+    equipment_usage = (obj.equipment_usage
+                       .select_related('equipment')
+                       .order_by('-date')[:10])
     today = datetime.date.today()
     month = {'date__year': today.year, 'date__month': today.month}
-    info_groups = [{
-        'title': 'Worker',
-        'rows': [
-            {'label': 'Hourly Rate', 'value': obj.hourly_rate, 'kind': 'money'},
-            {'label': 'Phone', 'value': obj.phone},
-            {'label': 'Tax ID', 'value': obj.tax_id},
-            {'label': 'Linked User', 'value': obj.user.username if obj.user_id else ''},
-            {'label': 'Status', 'value': 'Active' if obj.is_active else 'Inactive',
-             'kind': 'pill', 'pill': 'green' if obj.is_active else 'slate'},
-        ],
-    }]
-    tables = [
-        {
-            'title': 'Attendance',
-            'columns': [
-                {'key': 'date', 'label': 'Date'},
-                {'key': 'task', 'label': 'Task'},
-                {'key': 'hours', 'label': 'Hours', 'class': 'num'},
-                {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
-                {'key': 'pay', 'label': 'Pay', 'class': 'num'},
-            ],
-            'rows': _table_rows(attendance, lambda r: {
-                'date': r.date, 'task': r.task.name if r.task_id else '',
-                'hours': f'{r.hours}h', 'ot': f'{r.overtime_hours}h' if r.overtime_hours else '',
-                'pay': _money(r.total_pay),
-            }),
-            'list_url': reverse('model_list', args=['labor', 'attendancerecord']),
-            'empty': 'No attendance logged.',
-        },
-        {
-            'title': 'Tasks',
-            'columns': [
-                {'key': 'name', 'label': 'Task'},
-                {'key': 'window', 'label': 'Window'},
-                {'key': 'status', 'label': 'Status'},
-            ],
-            'rows': _table_rows(tasks, lambda t: {
-                'name': t.name,
-                'window': f'{t.start_date} → {t.end_date}' if t.start_date and t.end_date else '',
-                'status': _status_pill(t.status, t.get_status_display()),
-                'view_url': reverse('task_detail', args=[t.pk]),
-            }),
-            'has_actions': True,
-            'list_url': reverse('model_list', args=['labor', 'task']),
-            'empty': 'No tasks assigned.',
-        },
-    ]
     month_attendance = obj.attendance_records.filter(**month)
-    return _record_detail(
-        request, 'labor', 'worker', obj, title=obj.name,
-        subtitle=f'{obj.farm_profile.farm_name} worker', nav='worker',
-        stats=[
-            {'label': 'Hourly Rate', 'value': obj.hourly_rate, 'icon': 'money', 'color': 'green'},
-            {'label': 'Month Hours', 'value': f"{month_attendance.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
-            {'label': 'Month Overtime', 'value': f"{month_attendance.aggregate(t=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'amber'},
-            {'label': 'Tasks', 'value': obj.tasks.count(), 'icon': 'check', 'color': 'teal'},
-        ],
-        info_groups=info_groups, tables=tables, list_label='Workers')
+    month_stats = month_attendance.aggregate(
+        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()),
+        ot=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()),
+    )
+    all_stats = obj.attendance_records.aggregate(
+        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()),
+        ot=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()),
+    )
+    total_paid = obj.payroll_lines.aggregate(
+        t=Coalesce(Sum('amount'), 0, output_field=DecimalField()))['t']
+    context = {
+        'worker': obj,
+        'nav': 'worker',
+        'attendance': attendance,
+        'tasks': tasks,
+        'payroll_lines': payroll_lines,
+        'equipment_usage': equipment_usage,
+        'month_stats': month_stats,
+        'all_stats': all_stats,
+        'total_paid': total_paid,
+        'month_pay': month_stats['hours'] * obj.hourly_rate
+                     + month_stats['ot'] * obj.hourly_rate * 2,
+        'can_write': _can_write(request.user, 'labor.worker'),
+        'urls': _crud_urls('labor', 'worker', pk=obj.pk),
+        'new_attendance_url': f"{reverse('model_create', kwargs={'app': 'labor', 'model': 'attendancerecord'})}?worker={obj.pk}",
+    }
+    return render(request, 'labor/worker_detail.html', context)
 
 
 @login_required
@@ -3342,109 +3285,62 @@ def task_detail_view(request, pk):
     from labor.models import Task
     obj = get_object_or_404(
         scoped_queryset(Task, request.user).prefetch_related('workers')
-            .select_related('field', 'crop_season', 'crop_season__crop'), pk=pk)
+            .select_related('field', 'crop_season', 'crop_season__crop',
+                            'crop_season__field'), pk=pk)
     workers = list(obj.workers.all())
     attendance = obj.attendance_records.select_related('worker').order_by('-date')[:15]
-    actions = []
-    if obj.status in ('ASSIGNED', 'IN_PROGRESS'):
-        label = 'Start Task' if obj.status == 'ASSIGNED' else 'Mark Complete'
-        actions.append({'label': label, 'url': reverse('task_advance', args=[obj.pk]),
-                        'method': 'post'})
-    info_groups = [{
-        'title': 'Task',
-        'rows': [
-            {'label': 'Status', 'value': obj.get_status_display(), 'kind': 'pill',
-             'pill': _LIVESTOCK_PILL.get(obj.status, 'slate')},
-            {'label': 'Assigned To', 'value': ', '.join(w.name for w in workers) or '-'},
-            {'label': 'Field', 'value': obj.field.name if obj.field_id else ''},
-            {'label': 'Crop Season', 'value': str(obj.crop_season) if obj.crop_season_id else ''},
-            {'label': 'Start Date', 'value': obj.start_date},
-            {'label': 'End Date', 'value': obj.end_date},
-            {'label': 'Description', 'value': obj.description},
-        ],
-    }]
-    tables = [{
-        'title': 'Attendance on this Task',
-        'columns': [
-            {'key': 'date', 'label': 'Date'},
-            {'key': 'worker', 'label': 'Worker'},
-            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
-            {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
-            {'key': 'pay', 'label': 'Pay', 'class': 'num'},
-        ],
-        'rows': _table_rows(attendance, lambda r: {
-            'date': r.date, 'worker': r.worker.name,
-            'hours': f'{r.hours}h', 'ot': f'{r.overtime_hours}h' if r.overtime_hours else '',
-            'pay': _money(r.total_pay),
-        }),
-        'empty': 'No attendance logged against this task.',
-    }]
-    return _record_detail(
-        request, 'labor', 'task', obj, title=obj.name,
-        subtitle='Work assignment', nav='task',
-        stats=[
-            {'label': 'Workers', 'value': len(workers), 'icon': 'layers', 'color': 'green'},
-            {'label': 'Hours Logged', 'value': f"{obj.attendance_records.aggregate(t=Coalesce(Sum('hours'), 0, output_field=DecimalField()))['t']}h", 'icon': 'clock', 'color': 'blue'},
-            {'label': 'Status', 'value': obj.get_status_display(), 'icon': 'check',
-             'color': 'green' if obj.status == 'COMPLETED' else 'amber'},
-        ],
-        info_groups=info_groups, tables=tables, actions=actions, list_label='Tasks')
+    totals = obj.attendance_records.aggregate(
+        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()),
+        ot=Coalesce(Sum('overtime_hours'), 0, output_field=DecimalField()),
+    )
+    labor_cost = sum(
+        (r.hours * r.worker.hourly_rate + r.overtime_hours * r.worker.hourly_rate * 2
+         for r in obj.attendance_records.select_related('worker')), Decimal('0'))
+    days_left = None
+    if obj.end_date and obj.status != 'COMPLETED':
+        days_left = (obj.end_date - datetime.date.today()).days
+    context = {
+        'task': obj,
+        'nav': 'task',
+        'workers': workers,
+        'attendance': attendance,
+        'totals': totals,
+        'labor_cost': labor_cost,
+        'days_left': days_left,
+        'days_over': -days_left if days_left is not None and days_left < 0 else 0,
+        'can_write': _can_write(request.user, 'labor.task'),
+        'urls': _crud_urls('labor', 'task', pk=obj.pk),
+        'advance_url': reverse('task_advance', args=[obj.pk]),
+        'new_attendance_url': f"{reverse('model_create', kwargs={'app': 'labor', 'model': 'attendancerecord'})}?task={obj.pk}",
+    }
+    return render(request, 'labor/task_detail.html', context)
 
 
 @login_required
 def payroll_run_detail_view(request, pk):
     from labor.models import PayrollRun
     obj = get_object_or_404(
-        scoped_queryset(PayrollRun, request.user).prefetch_related('lines__worker'), pk=pk)
+        scoped_queryset(PayrollRun, request.user)
+        .select_related('farm_profile', 'budget_item', 'budget_item__subcode',
+                        'budget_item__budget')
+        .prefetch_related('lines__worker', 'lines__expense'), pk=pk)
     lines = list(obj.lines.all())
-    actions = []
-    if obj.status != 'COMPLETED':
-        actions.append({'label': 'Generate from Attendance',
-                        'url': reverse('payroll_generate', args=[obj.pk]), 'method': 'post'})
-    if obj.status == 'PENDING' and lines:
-        actions.append({'label': 'Mark Completed',
-                        'url': reverse('payroll_complete', args=[obj.pk]), 'method': 'post',
-                        'confirm': 'Mark this payroll run as completed?'})
-    info_groups = [{
-        'title': 'Payroll Run',
-        'rows': [
-            {'label': 'Period', 'value': f'{obj.start_date} → {obj.end_date}'},
-            {'label': 'Status', 'value': obj.get_status_display(), 'kind': 'pill',
-             'pill': _LIVESTOCK_PILL.get(obj.status, 'slate')},
-            {'label': 'Total', 'value': obj.total_amount, 'kind': 'money'},
-            {'label': 'Created', 'value': obj.created_at.date()},
-        ],
-    }]
-    tables = [{
-        'title': 'Payroll Lines',
-        'columns': [
-            {'key': 'worker', 'label': 'Worker'},
-            {'key': 'rate', 'label': 'Rate', 'class': 'num'},
-            {'key': 'hours', 'label': 'Hours', 'class': 'num'},
-            {'key': 'ot', 'label': 'Overtime', 'class': 'num'},
-            {'key': 'amount', 'label': 'Amount', 'class': 'num'},
-        ],
-        'rows': _table_rows(lines, lambda l: {
-            'worker': _main(l.worker.name),
-            'rate': _money(l.worker.hourly_rate),
-            'hours': f'{l.hours}h', 'ot': f'{l.overtime_hours}h' if l.overtime_hours else '',
-            'amount': _money(l.amount),
-        }),
-        'empty': 'No lines yet — generate them from attendance.',
-    }]
-    return _record_detail(
-        request, 'labor', 'payrollrun', obj,
-        title=f'Payroll {obj.start_date} → {obj.end_date}',
-        subtitle=f'{obj.farm_profile.farm_name} payroll', nav='payrollrun',
-        status_pill={'text': obj.get_status_display(),
-                     'color': _LIVESTOCK_PILL.get(obj.status, 'slate')},
-        stats=[
-            {'label': 'Workers Paid', 'value': len(lines), 'icon': 'layers', 'color': 'green'},
-            {'label': 'Total Hours', 'value': f"{sum(l.hours for l in lines)}h", 'icon': 'clock', 'color': 'blue'},
-            {'label': 'Overtime', 'value': f"{sum(l.overtime_hours for l in lines)}h", 'icon': 'clock', 'color': 'amber'},
-            {'label': 'Total Amount', 'value': obj.total_amount, 'icon': 'money', 'color': 'teal'},
-        ],
-        info_groups=info_groups, tables=tables, actions=actions, list_label='Payroll')
+    total_hours = sum((l.hours for l in lines), Decimal('0'))
+    total_ot = sum((l.overtime_hours for l in lines), Decimal('0'))
+    posted_expenses = sum(1 for l in lines if getattr(l, 'expense', None))
+    context = {
+        'run': obj,
+        'nav': 'payrollrun',
+        'lines': lines,
+        'total_hours': total_hours,
+        'total_ot': total_ot,
+        'posted_expenses': posted_expenses,
+        'can_write': _can_write(request.user, 'labor.payrollrun'),
+        'urls': _crud_urls('labor', 'payrollrun', pk=obj.pk),
+        'generate_url': reverse('payroll_generate', args=[obj.pk]),
+        'complete_url': reverse('payroll_complete', args=[obj.pk]),
+    }
+    return render(request, 'labor/payroll_run_detail.html', context)
 
 
 @login_required

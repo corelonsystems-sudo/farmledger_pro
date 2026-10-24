@@ -1,0 +1,34 @@
+<script>
+(function () {
+    const nav = document.querySelector('.budget-tabs');
+    if (!nav) return;
+    const tabs = Array.from(nav.querySelectorAll('[role="tab"]'));
+    const panels = Array.from(document.querySelectorAll('.budget-tab-panel'));
+    function activate(tab, focus) {
+        const target = tab.getAttribute('aria-controls');
+        tabs.forEach(item => {
+            const selected = item === tab;
+            item.setAttribute('aria-selected', String(selected));
+            item.tabIndex = selected ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.id !== target; });
+        if (focus) tab.focus();
+    }
+    nav.addEventListener('click', event => {
+        const tab = event.target.closest('[role="tab"]');
+        if (tab && nav.contains(tab)) activate(tab, false);
+    });
+    nav.addEventListener('keydown', event => {
+        const index = tabs.indexOf(event.target);
+        if (index < 0) return;
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        activate(tabs[next], true);
+    });
+})();
+</script>
