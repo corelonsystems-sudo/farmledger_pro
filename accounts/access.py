@@ -34,6 +34,7 @@ FARM_LOOKUPS = {
     'budgets.budgetincomeplan': 'budget__farm_profile_id',
     'integrations.bankaccount': 'farm_profile_id',
     'integrations.banktransaction': 'bank_account__farm_profile_id',
+    'integrations.mtnmomotransaction': 'farm_profile_id',
     'livestock.animalgroup': 'farm_profile_id',
     'livestock.animalrecord': 'farm_profile_id',
     'livestock.animalhealthrecord': 'animal__farm_profile_id',
@@ -53,6 +54,7 @@ FINANCIAL_MODELS = {
     'expenses.expense', 'income.income', 'budgets.budget',
     'budgets.budgetitem', 'budgets.budgetincomeplan', 'inventory.inventorytransaction',
     'integrations.bankaccount', 'integrations.banktransaction',
+    'integrations.mtnmomotransaction',
     'crops.invoice', 'crops.invoicepayment',
 }
 

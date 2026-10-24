@@ -3,7 +3,15 @@ from datetime import timedelta
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import BankAccount, BankTransaction
+from .models import BankAccount, BankTransaction, MtnMoMoTransaction
+
+
+@admin.register(MtnMoMoTransaction)
+class MtnMoMoTransactionAdmin(admin.ModelAdmin):
+    list_display = ('reference_id', 'invoice', 'payer_msisdn', 'amount', 'currency', 'status', 'created_at')
+    list_filter = ('status', 'currency')
+    search_fields = ('reference_id', 'external_id', 'payer_msisdn', 'financial_transaction_id', 'invoice__number')
+    readonly_fields = ('reference_id', 'raw_response', 'invoice_payment', 'created_at', 'updated_at')
 
 
 class BankTransactionInline(admin.TabularInline):

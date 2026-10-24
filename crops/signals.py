@@ -2,13 +2,15 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .models import HarvestRecord, InvoicePayment, ProcessingStage, Sale
-from .services import (sync_invoice_payment_income, sync_processing_expense,
-                       sync_sale_income, sync_sale_invoice)
+from .services import (sync_harvest_expense, sync_invoice_payment_income,
+                       sync_processing_expense, sync_sale_income,
+                       sync_sale_invoice)
 
 
 @receiver(post_save, sender=HarvestRecord)
 def calculate_net_profit_on_harvest_save(sender, instance, created, **kwargs):
     """Update the crop season status when a harvest record is created."""
+    sync_harvest_expense(instance)
     crop_season = instance.crop_season
 
     if created and crop_season.status not in (

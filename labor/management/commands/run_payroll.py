@@ -24,6 +24,10 @@ class Command(BaseCommand):
             '--farm-profile-id', type=int, default=None,
             help='Farm profile ID. If not specified, runs for all farm profiles.',
         )
+        parser.add_argument(
+            '--budget-item-id', type=int, default=None,
+            help='BudgetItem ID the payroll expenses are posted against.',
+        )
 
     def handle(self, *args, **options):
         from datetime import date as date_type
@@ -38,8 +42,16 @@ class Command(BaseCommand):
             raise CommandError('Start date must be before or equal to end date.')
 
         farm_profile_id = options.get('farm_profile_id')
+        budget_item_id = options.get('budget_item_id')
 
         from accounts.models import FarmProfile
+        from budgets.models import BudgetItem
+        budget_item = None
+        if budget_item_id:
+            budget_item = BudgetItem.objects.filter(pk=budget_item_id).first()
+            if budget_item is None:
+                raise CommandError(f'BudgetItem {budget_item_id} not found.')
+
         if farm_profile_id:
             farm_profiles = FarmProfile.objects.filter(id=farm_profile_id)
         else:
@@ -59,6 +71,8 @@ class Command(BaseCommand):
                 start_date=start_date,
                 end_date=end_date,
                 status=PayrollRun.PayrollStatus.PENDING,
+                budget_item=(budget_item if budget_item
+                             and budget_item.budget.farm_profile_id == farm.id else None),
             )
 
             workers = Worker.objects.filter(farm_profile=farm, is_active=True)
@@ -69,6 +83,8 @@ class Command(BaseCommand):
                 name='Labor',
                 defaults={'schedule_f_line': labor_line} if labor_line else {},
             )
+            if payroll_run.budget_item_id:
+                labor_category = payroll_run.budget_item.category
 
             with transaction.atomic():
                 for worker in workers:
@@ -96,6 +112,7 @@ class Command(BaseCommand):
                     expense = Expense.objects.create(
                         farm_profile=farm,
                         category=labor_category,
+                        budget_item=payroll_run.budget_item,
                         crop_season=crop_season,
                         amount=total_pay,
                         date=end_date,

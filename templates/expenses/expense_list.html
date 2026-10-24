@@ -156,6 +156,7 @@
                 <tr>
                     <th>Date</th>
                     <th>Budget Code</th>
+                    <th>Subcode</th>
                     <th>Vendor</th>
                     <th>Crop Season</th>
                     <th>Field</th>
@@ -171,6 +172,17 @@
                     <td>{{ expense.date }}</td>
                     <td>
                         <a class="link" href="{% url 'budget_code_detail' expense.category.pk %}">{% if expense.category.code %}{{ expense.category.code }} — {% endif %}{{ expense.category.name }}</a>
+                    </td>
+                    <td>
+                        {% if expense.budget_item_id %}
+                            {% if expense.budget_item.subcode_id %}
+                                <a class="link" href="{% url 'budget_subcode_detail' expense.budget_item.subcode.pk %}">{{ expense.budget_item.subcode.code|default:"" }}{% if expense.budget_item.subcode.code %} — {% endif %}{{ expense.budget_item.subcode.name }}</a>
+                            {% else %}
+                                {{ expense.budget_item.line_code|default:"-" }}
+                            {% endif %}
+                        {% else %}
+                            <span class="cell-red">Unbudgeted</span>
+                        {% endif %}
                     </td>
                     <td>{{ expense.vendor|default:"-" }}</td>
                     <td>{{ expense.crop_season|default:"-" }}</td>

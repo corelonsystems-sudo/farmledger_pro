@@ -114,3 +114,108 @@ class EquipmentSyncAndDetailTests(TestCase):
         self.assertContains(response, 'Baler')
         self.assertContains(response, 'Belt replaced')
         self.assertContains(response, '5h')
+
+
+class EquipmentExpenseSyncTests(TestCase):
+    """Maintenance logs and equipment purchases auto-post Expense rows."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Farm A')
+
+    def test_maintenance_posts_expense(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(farm_profile=self.farm, name='Tractor')
+        log = MaintenanceLog.objects.create(
+            equipment=eq, date=date(2026, 1, 10),
+            description='Oil change', cost=Decimal('500'))
+        expense = Expense.objects.get(maintenance_log=log)
+        self.assertEqual(expense.amount, Decimal('500'))
+        self.assertEqual(expense.date, date(2026, 1, 10))
+        self.assertEqual(expense.equipment, eq)
+        self.assertEqual(expense.farm_profile, self.farm)
+        self.assertEqual(expense.category.name, 'Equipment Maintenance')
+        self.assertEqual(
+            expense.category.schedule_f_line.code, 'part1_repairs_maintenance')
+
+    def test_maintenance_update_and_delete_sync(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(farm_profile=self.farm, name='Sprayer')
+        log = MaintenanceLog.objects.create(
+            equipment=eq, date=date(2026, 1, 10),
+            description='Filter', cost=Decimal('100'))
+        log.cost = Decimal('250')
+        log.save()
+        self.assertEqual(Expense.objects.get(maintenance_log=log).amount, Decimal('250'))
+        log.delete()
+        self.assertFalse(Expense.objects.exists())
+
+    def test_zero_cost_removes_expense(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(farm_profile=self.farm, name='Pump')
+        log = MaintenanceLog.objects.create(
+            equipment=eq, date=date(2026, 1, 10),
+            description='Checkup', cost=Decimal('80'))
+        log.cost = Decimal('0')
+        log.save()
+        self.assertFalse(Expense.objects.filter(maintenance_log=log).exists())
+
+    def test_purchase_posts_expense(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(
+            farm_profile=self.farm, name='Harvester',
+            purchase_date=date(2026, 1, 5), purchase_cost=Decimal('30000'))
+        expense = Expense.objects.get(equipment_purchase=eq)
+        self.assertEqual(expense.amount, Decimal('30000'))
+        self.assertEqual(expense.date, date(2026, 1, 5))
+        self.assertEqual(expense.category.schedule_f_line.code, 'part1_depreciation')
+
+    def test_leased_purchase_posts_no_expense(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(
+            farm_profile=self.farm, name='Rented truck',
+            ownership=Equipment.Ownership.LEASED, purchase_cost=Decimal('5000'))
+        self.assertFalse(Expense.objects.filter(equipment_purchase=eq).exists())
+
+    def test_purchase_edit_syncs(self):
+        from expenses.models import Expense
+        eq = Equipment.objects.create(
+            farm_profile=self.farm, name='Trailer', purchase_cost=Decimal('9000'))
+        eq.purchase_cost = Decimal('12000')
+        eq.save()
+        self.assertEqual(
+            Expense.objects.get(equipment_purchase=eq).amount, Decimal('12000'))
+
+
+class EquipmentNewFieldsTests(TestCase):
+    def setUp(self):
+        from .models import EquipmentUsage
+        from labor.models import Worker
+        self.user = User.objects.create_user(username='owner', password='pw')
+        self.farm = FarmProfile.objects.create(user=self.user, farm_name='Farm A')
+        self.worker = Worker.objects.create(farm_profile=self.farm, name='John')
+        self.eq = Equipment.objects.create(
+            farm_profile=self.farm, name='Tractor',
+            opening_hours=Decimal('100'))
+        EquipmentUsage.objects.create(
+            equipment=self.eq, date=date(2026, 1, 10),
+            hours=Decimal('6'), operator=self.worker,
+            fuel_liters=Decimal('20'), fuel_cost=Decimal('120'))
+        self.client.force_login(self.user)
+
+    def test_opening_hours_plus_usage(self):
+        self.eq.refresh_from_db()
+        self.assertEqual(self.eq.hours_used, Decimal('106'))
+
+    def test_detail_shows_new_fields(self):
+        MaintenanceLog.objects.create(
+            equipment=self.eq, date=date(2026, 1, 5),
+            description='Service', cost=Decimal('200'),
+            next_due_date=date(2020, 1, 1))
+        response = self.client.get(
+            reverse('equipment_detail', args=[self.eq.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Service overdue')
+        self.assertContains(response, 'John')
+        self.assertContains(response, '20L')
+        self.assertTrue(response.context['service_overdue'])

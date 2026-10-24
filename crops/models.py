@@ -234,6 +234,18 @@ class HarvestRecord(models.Model):
     waste_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0'), blank=True, help_text='Estimated value or loss of the waste.')
     quality_grade = models.CharField(max_length=20, blank=True, default='', help_text='e.g. Grade A, Premium, Standard')
     moisture_content = models.DecimalField(max_digits=5, decimal_places=2, default=0, blank=True, help_text='Percentage moisture content')
+    cost = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, blank=True,
+        help_text='Harvesting cost (labor, hired machinery, transport).')
+    performed_by = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Crew, contractor, or machine-hire provider.')
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='harvest_records',
+        help_text='Budget item the harvesting cost is posted against.')
     notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,7 +1,25 @@
+import os
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_dotenv(path):
+    """Minimal .env loader: sets KEY=VALUE pairs not already in os.environ."""
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        os.environ.setdefault(key.strip(), value.strip().strip('"\''))
+
+
+_load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = 'django-insecure-farmledger-pro-dev-key-change-in-production'
 DEBUG = True
@@ -160,6 +178,13 @@ CELERY_TIMEZONE = TIME_ZONE
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 DEFAULT_FROM_EMAIL = 'noreply@farmledger.pro'
+
+# MTN Mobile Money (Collections API) — see integrations/mtn_momo.py
+MTN_MOMO_SUBSCRIPTION_KEY = os.environ.get('MTN_MOMO_SUBSCRIPTION_KEY', '')
+MTN_MOMO_API_USER = os.environ.get('MTN_MOMO_API_USER', '')
+MTN_MOMO_API_KEY = os.environ.get('MTN_MOMO_API_KEY', '')
+MTN_MOMO_TARGET_ENV = os.environ.get('MTN_MOMO_TARGET_ENV', 'sandbox')  # or 'mtnuganda'
+MTN_MOMO_BASE_URL = os.environ.get('MTN_MOMO_BASE_URL', '')
 
 CORS_ALLOW_ALL_ORIGINS = True
 

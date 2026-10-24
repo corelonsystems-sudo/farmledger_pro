@@ -1,4 +1,53 @@
+import uuid
+
 from django.db import models
+
+
+class MtnMoMoTransaction(models.Model):
+    """An MTN Mobile Money collection request (request-to-pay)."""
+
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        SUCCESSFUL = 'SUCCESSFUL', 'Successful'
+        FAILED = 'FAILED', 'Failed'
+
+    farm_profile = models.ForeignKey(
+        'accounts.FarmProfile',
+        on_delete=models.CASCADE,
+        related_name='mtn_transactions',
+    )
+    invoice = models.ForeignKey(
+        'crops.Invoice',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='mtn_transactions',
+    )
+    invoice_payment = models.ForeignKey(
+        'crops.InvoicePayment',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='mtn_transactions',
+    )
+    reference_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    external_id = models.CharField(max_length=100, blank=True, default='')
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    currency = models.CharField(max_length=3, default='UGX')
+    payer_msisdn = models.CharField(max_length=20)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    financial_transaction_id = models.CharField(max_length=100, blank=True, default='')
+    payer_message = models.CharField(max_length=200, blank=True, default='')
+    payee_note = models.CharField(max_length=200, blank=True, default='')
+    status_reason = models.TextField(blank=True, default='')
+    raw_response = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'MTN {self.amount} {self.currency} from {self.payer_msisdn} - {self.status}'
 
 
 class BankAccount(models.Model):

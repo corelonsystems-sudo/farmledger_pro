@@ -23,10 +23,17 @@ class ExpenseSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'created_at', 'updated_at', 'category')
 
     def validate_budget_item(self, value):
-        # Processing-stage expenses are system-generated without a budget
-        # item; every manually managed expense still requires one.
-        if value is None and not getattr(
-                self.instance, 'processing_stage_id', None):
+        # System-generated expenses (processing stage, maintenance, equipment
+        # purchase/usage fuel, livestock, payroll) may lack a budget item;
+        # every manually managed expense still requires one.
+        auto_fields = ('processing_stage_id', 'maintenance_log_id',
+                       'equipment_purchase_id', 'equipment_usage_id',
+                       'animal_health_record_id', 'animal_feed_log_id',
+                       'poultry_feed_log_id', 'poultry_health_record_id',
+                       'animal_acquisition_id', 'payroll_line_id',
+                       'harvest_record_id')
+        if value is None and not any(
+                getattr(self.instance, f, None) for f in auto_fields):
             raise serializers.ValidationError('Every expense must be linked to a budget item.')
         return value
 

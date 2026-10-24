@@ -113,6 +113,12 @@ class PayrollRun(models.Model):
         default=PayrollStatus.PENDING,
     )
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='payroll_runs',
+        help_text='Budget item payroll wages are posted against.')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -167,6 +173,12 @@ class PayrollLine(models.Model):
     hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     overtime_hours = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='payroll_lines',
+        help_text='Budget item this pay is posted against.')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

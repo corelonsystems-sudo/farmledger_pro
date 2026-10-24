@@ -118,6 +118,12 @@ class AnimalRecord(models.Model):
     birth_date = models.DateField(null=True, blank=True)
     acquisition_date = models.DateField(null=True, blank=True, help_text='When purchased/acquired')
     acquisition_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='animal_acquisitions',
+        help_text='Budget item the acquisition cost is posted against.')
     current_weight_kg = models.DecimalField(max_digits=8, decimal_places=2, default=0, blank=True)
     health_status = models.CharField(
         max_length=20,
@@ -179,6 +185,12 @@ class AnimalHealthRecord(models.Model):
     medication = models.CharField(max_length=200, blank=True, default='')
     dosage = models.CharField(max_length=100, blank=True, default='')
     cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='animal_health_records',
+        help_text='Budget item this health cost is posted against.')
     veterinarian = models.CharField(max_length=200, blank=True, default='')
     next_due_date = models.DateField(null=True, blank=True, help_text='Next vaccination/treatment due')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -242,6 +254,12 @@ class AnimalFeedLog(models.Model):
     feed_type = models.CharField(max_length=100, help_text='e.g. Hay, Grain Mix, Pasture')
     quantity_kg = models.DecimalField(max_digits=10, decimal_places=2)
     cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='animal_feed_logs',
+        help_text='Budget item this feed cost is posted against.')
     notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -396,6 +414,12 @@ class PoultryFeedLog(models.Model):
     feed_type = models.CharField(max_length=100, help_text='e.g. Starter, Grower, Layer Mash')
     quantity_kg = models.DecimalField(max_digits=10, decimal_places=2)
     cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='poultry_feed_logs',
+        help_text='Budget item this feed cost is posted against.')
     notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -432,6 +456,12 @@ class PoultryHealthRecord(models.Model):
     description = models.TextField()
     medication = models.CharField(max_length=200, blank=True, default='')
     cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, blank=True)
+    budget_item = models.ForeignKey(
+        'budgets.BudgetItem',
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name='poultry_health_records',
+        help_text='Budget item this health cost is posted against.')
     birds_affected = models.PositiveIntegerField(default=0, blank=True)
     next_due_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

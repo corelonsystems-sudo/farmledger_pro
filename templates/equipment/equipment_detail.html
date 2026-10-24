@@ -77,8 +77,10 @@
             <div class="budget-header-meta">
                 <span class="budget-header-status {% if equipment.is_active %}active{% else %}inactive{% endif %}">{% if equipment.is_active %}Active{% else %}Inactive{% endif %}</span>
                 <span class="budget-header-tag">{{ equipment.get_equipment_type_display }}</span>
+                <span class="budget-header-tag">{{ equipment.get_ownership_display }}</span>
                 <span class="budget-header-tag">{{ equipment.hours_used }}h used</span>
                 {% if equipment.current_value %}<span class="budget-header-tag">Value {{ equipment.current_value|as_currency:currency }}</span>{% endif %}
+                {% if service_overdue %}<span class="budget-header-status" style="background:#fecaca; color:#7f1d1d;">Service overdue</span>{% endif %}
             </div>
         </div>
     </div>
@@ -141,7 +143,19 @@
                 </strong>
             </div>
             {% endfor %}
+            {% if fuel_liters %}
+            <div class="eq-row"><span>Fuel used (logged)</span><strong>{{ fuel_liters }} L</strong></div>
+            {% endif %}
+            <div class="eq-row"><span>Opening hours</span><strong>{{ equipment.opening_hours }}h</strong></div>
             <div class="eq-row"><span>Hours from log</span><strong>{{ logged_hours }}h</strong></div>
+            {% if next_service %}
+            <div class="eq-row"><span>Next service due</span>
+                <strong{% if service_overdue %} style="color:#b91c1c;"{% endif %}>
+                    {% if next_service.next_due_date %}{{ next_service.next_due_date }}{% endif %}{% if next_service.next_due_date and next_service.next_due_hours %} · {% endif %}{% if next_service.next_due_hours %}{{ next_service.next_due_hours }}h{% endif %}
+                    {% if service_overdue %}(overdue){% endif %}
+                </strong>
+            </div>
+            {% endif %}
             {% if can_write %}
             <div class="eq-quick no-print">
                 <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ new_maint_url }}&amp;next={{ request.path }}" data-modal-title="Log Maintenance">+ Maintenance</a>

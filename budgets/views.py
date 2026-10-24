@@ -363,13 +363,14 @@ def budget_detail_view(request, pk):
         scoped_queryset(Budget, request.user, Budget.objects.select_related('farm_profile')),
         pk=pk)
     plan = budget_plan_data(budget)
-    expenses = list(Expense.objects.filter(budget_item__budget=budget).select_related('category', 'budget_item').order_by('-date'))
+    expenses = list(Expense.objects.filter(budget_item__budget=budget).select_related('category', 'budget_item', 'budget_item__subcode').order_by('-date'))
     if request.GET.get('export'):
         from farmledger.views import _M, _export_report
         sections = budget_export_sections(budget, plan)
         sections.append({'title': 'Actual Expenditure Ledger',
-                         'headers': ['Date', 'Line Code', 'Budget Code', 'Vendor', 'Amount'],
+                         'headers': ['Date', 'Line Code', 'Budget Code', 'Subcode', 'Vendor', 'Amount'],
                          'rows': [[str(e.date), e.budget_item.line_code, e.category.name,
+                                   str(e.budget_item.subcode) if e.budget_item.subcode_id else '-',
                                    e.vendor, _M(e.amount)] for e in expenses]})
         return _export_report(
             request, request.GET['export'], f'Annual Operating Budget - {budget.name}',

@@ -1278,6 +1278,7 @@ def invoice_detail_view(request, pk):
     can_write = request.user.is_superuser or _invoice_write_farms(request.user).exists()
     source_proforma = (Invoice.objects.filter(converted_invoice=invoice).first()
                        if not invoice.is_proforma else None)
+    from integrations.mtn_momo import MtnMoMoClient
     return render(request, 'invoices/invoice_detail.html', {
         'invoice': invoice,
         'source_proforma': source_proforma,
@@ -1298,6 +1299,11 @@ def invoice_detail_view(request, pk):
         'edit_url': reverse('invoice_edit', args=[invoice.pk]),
         'delete_url': reverse('invoice_delete', args=[invoice.pk]),
         'pdf_url': reverse('invoice_pdf', args=[invoice.pk]),
+        'mtn_enabled': MtnMoMoClient().is_configured,
+        'mtn_pay_url': reverse('mtn_pay_invoice', args=[invoice.pk]),
+        'mtn_txns': invoice.mtn_transactions.order_by('-created_at')[:5],
+        'mtn_pending': invoice.mtn_transactions.filter(
+            status='PENDING').exists(),
     })
 
 

@@ -192,6 +192,86 @@ class Expense(models.Model):
         related_name='expense',
         help_text='Auto-generated expense for this processing stage cost.',
     )
+    maintenance_log = models.OneToOneField(
+        'equipment.MaintenanceLog',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this maintenance log cost.',
+    )
+    equipment_purchase = models.OneToOneField(
+        'equipment.Equipment',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='purchase_expense',
+        help_text='Auto-generated expense for this equipment purchase cost.',
+    )
+    equipment_usage = models.OneToOneField(
+        'equipment.EquipmentUsage',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='fuel_expense',
+        help_text='Auto-generated expense for this usage record fuel cost.',
+    )
+    animal_health_record = models.OneToOneField(
+        'livestock.AnimalHealthRecord',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this animal health cost.',
+    )
+    animal_feed_log = models.OneToOneField(
+        'livestock.AnimalFeedLog',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this feed log cost.',
+    )
+    poultry_feed_log = models.OneToOneField(
+        'livestock.PoultryFeedLog',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this poultry feed cost.',
+    )
+    poultry_health_record = models.OneToOneField(
+        'livestock.PoultryHealthRecord',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this poultry health cost.',
+    )
+    animal_acquisition = models.OneToOneField(
+        'livestock.AnimalRecord',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='acquisition_expense',
+        help_text='Auto-generated expense for this animal purchase cost.',
+    )
+    payroll_line = models.OneToOneField(
+        'labor.PayrollLine',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this payroll line.',
+    )
+    harvest_record = models.OneToOneField(
+        'crops.HarvestRecord',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='expense',
+        help_text='Auto-generated expense for this harvesting cost.',
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateField()
     vendor = models.CharField(max_length=200, blank=True, default='')
@@ -217,7 +297,14 @@ class Expense(models.Model):
     def clean(self):
         from django.core.exceptions import ValidationError
         errors = {}
-        if not self.budget_item_id and not self.processing_stage_id:
+        auto_links = ('processing_stage_id', 'maintenance_log_id',
+                      'equipment_purchase_id', 'equipment_usage_id',
+                      'animal_health_record_id', 'animal_feed_log_id',
+                      'poultry_feed_log_id', 'poultry_health_record_id',
+                      'animal_acquisition_id', 'payroll_line_id',
+                      'harvest_record_id')
+        if not self.budget_item_id and not any(
+                getattr(self, f, None) for f in auto_links):
             errors['budget_item'] = 'Every expense must be linked to a budget item.'
         if self.amount is not None and self.amount < 0:
             errors['amount'] = 'Amount cannot be negative.'

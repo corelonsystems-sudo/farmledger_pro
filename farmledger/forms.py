@@ -235,11 +235,16 @@ class HarvestRecordForm(forms.ModelForm):
     class Meta:
         model = HarvestRecord
         fields = ['crop_season', 'harvest_date', 'harvest_type', 'quantity', 'unit',
-                  'waste_name', 'waste_quantity', 'waste_value', 'quality_grade', 'moisture_content', 'notes']
+                  'cost', 'performed_by', 'budget_item',
+                  'waste_name', 'waste_quantity', 'waste_value',
+                  'quality_grade', 'moisture_content', 'notes']
         widgets = {
             'harvest_date': forms.DateInput(attrs={'type': 'date'}),
             'quantity': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'unit': forms.TextInput(attrs={'placeholder': 'kg, lbs, tons...'}),
+            'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'performed_by': forms.TextInput(attrs={'placeholder': 'Crew / contractor name'}),
+            'budget_item': SubcodeTaggedSelect(),
             'waste_name': forms.TextInput(attrs={'placeholder': 'e.g., husk, bran'}),
             'waste_quantity': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'waste_value': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
@@ -247,6 +252,16 @@ class HarvestRecordForm(forms.ModelForm):
             'moisture_content': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
         }
+        labels = {
+            'cost': 'Harvesting cost',
+            'performed_by': 'Harvested by',
+            'budget_item': 'Budget item (for the cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 class ProcessingStageForm(forms.ModelForm):
@@ -628,42 +643,90 @@ class InventoryAlertForm(forms.ModelForm):
 
 # -- Equipment --
 
+def _require_budget_item(form, cost_field):
+    """Require a budget item when the record carries a cost."""
+    cost = form.cleaned_data.get(cost_field)
+    budget_item = form.cleaned_data.get('budget_item')
+    if cost and cost > 0 and not budget_item:
+        form.add_error('budget_item',
+                       'Required — this cost posts an expense, and every '
+                       'expense must be attached to a budget item.')
+
+
 class EquipmentForm(forms.ModelForm):
     class Meta:
         model = Equipment
-        fields = ['farm_profile', 'name', 'equipment_type', 'purchase_date', 'purchase_cost',
-                  'current_value', 'hours_used', 'is_active']
+        fields = ['farm_profile', 'name', 'equipment_type', 'ownership', 'purchase_date',
+                  'purchase_cost', 'budget_item', 'current_value', 'opening_hours', 'is_active']
         widgets = {
             'name': forms.TextInput(attrs={'placeholder': 'e.g. John Deere 5075E'}),
             'purchase_date': forms.DateInput(attrs={'type': 'date'}),
             'purchase_cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'current_value': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
-            'hours_used': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'opening_hours': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
         }
-        labels = {'farm_profile': 'Farm'}
+        labels = {
+            'farm_profile': 'Farm',
+            'budget_item': 'Budget item (for the purchase cost)',
+            'opening_hours': 'Opening hours (meter at registration)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('ownership') != Equipment.Ownership.LEASED:
+            _require_budget_item(self, 'purchase_cost')
+        return cleaned
 
 
 class MaintenanceLogForm(forms.ModelForm):
     class Meta:
         model = MaintenanceLog
-        fields = ['equipment', 'date', 'description', 'cost', 'performed_by']
+        fields = ['equipment', 'date', 'description', 'cost', 'budget_item',
+                  'performed_by', 'next_due_date', 'next_due_hours', 'receipt_image']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.Textarea(attrs={'rows': 3, 'placeholder': 'What was done?'}),
             'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'performed_by': forms.TextInput(attrs={'placeholder': 'Technician / shop name'}),
+            'next_due_date': forms.DateInput(attrs={'type': 'date'}),
+            'next_due_hours': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+            'next_due_date': 'Next service due (date)',
+            'next_due_hours': 'Next service due (meter hours)',
+            'receipt_image': 'Receipt / repair invoice',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 class EquipmentUsageForm(forms.ModelForm):
     class Meta:
         model = EquipmentUsage
-        fields = ['equipment', 'crop_season', 'field', 'date', 'hours', 'description']
+        fields = ['equipment', 'crop_season', 'field', 'operator', 'date', 'hours',
+                  'fuel_liters', 'fuel_cost', 'budget_item', 'description']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'hours': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'fuel_liters': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'fuel_cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'description': forms.Textarea(attrs={'rows': 3, 'placeholder': 'What was it used for?'}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the fuel cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'fuel_cost')
+        return cleaned
 
 
 # -- Labor --
@@ -713,13 +776,17 @@ class AttendanceRecordForm(forms.ModelForm):
 class PayrollRunForm(forms.ModelForm):
     class Meta:
         model = PayrollRun
-        fields = ['farm_profile', 'start_date', 'end_date', 'status', 'total_amount']
+        fields = ['farm_profile', 'start_date', 'end_date', 'status', 'budget_item', 'total_amount']
         widgets = {
             'start_date': forms.DateInput(attrs={'type': 'date'}),
             'end_date': forms.DateInput(attrs={'type': 'date'}),
+            'budget_item': SubcodeTaggedSelect(),
             'total_amount': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
         }
-        labels = {'farm_profile': 'Farm'}
+        labels = {
+            'farm_profile': 'Farm',
+            'budget_item': 'Budget item (wages are posted here)',
+        }
 
 
 # -- Budgets --
@@ -873,15 +940,16 @@ class AnimalRecordForm(forms.ModelForm):
     class Meta:
         model = AnimalRecord
         fields = ['group', 'farm_profile', 'tag_number', 'name', 'species', 'gender',
-                  'birth_date', 'acquisition_date', 'acquisition_cost', 'current_weight_kg',
-                  'health_status', 'parent_male', 'parent_female', 'is_sold', 'sale_date',
-                  'sale_price', 'notes']
+                  'birth_date', 'acquisition_date', 'acquisition_cost', 'budget_item',
+                  'current_weight_kg', 'health_status', 'parent_male', 'parent_female',
+                  'is_sold', 'sale_date', 'sale_price', 'notes']
         widgets = {
             'tag_number': forms.TextInput(attrs={'placeholder': 'Ear tag / ID number'}),
             'name': forms.TextInput(attrs={'placeholder': 'Animal name (optional)'}),
             'birth_date': forms.DateInput(attrs={'type': 'date'}),
             'acquisition_date': forms.DateInput(attrs={'type': 'date'}),
             'acquisition_cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'current_weight_kg': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'sale_date': forms.DateInput(attrs={'type': 'date'}),
             'sale_price': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
@@ -889,25 +957,40 @@ class AnimalRecordForm(forms.ModelForm):
         }
         labels = {
             'farm_profile': 'Farm',
+            'budget_item': 'Budget item (for the acquisition cost)',
             'parent_male': 'Sire (father)',
             'parent_female': 'Dam (mother)',
         }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'acquisition_cost')
+        return cleaned
 
 
 class AnimalHealthRecordForm(forms.ModelForm):
     class Meta:
         model = AnimalHealthRecord
         fields = ['animal', 'record_type', 'date', 'description', 'medication', 'dosage',
-                  'cost', 'veterinarian', 'next_due_date']
+                  'cost', 'budget_item', 'veterinarian', 'next_due_date']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.Textarea(attrs={'rows': 3, 'placeholder': 'What was done?'}),
             'medication': forms.TextInput(attrs={'placeholder': 'e.g. Penicillin, Vaccine'}),
             'dosage': forms.TextInput(attrs={'placeholder': 'e.g. 10ml IM'}),
             'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'veterinarian': forms.TextInput(attrs={'placeholder': 'Vet name'}),
             'next_due_date': forms.DateInput(attrs={'type': 'date'}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 class BreedingRecordForm(forms.ModelForm):
@@ -932,14 +1015,23 @@ class BreedingRecordForm(forms.ModelForm):
 class AnimalFeedLogForm(forms.ModelForm):
     class Meta:
         model = AnimalFeedLog
-        fields = ['group', 'date', 'feed_type', 'quantity_kg', 'cost', 'notes']
+        fields = ['group', 'date', 'feed_type', 'quantity_kg', 'cost', 'budget_item', 'notes']
         widgets = {
+            'budget_item': SubcodeTaggedSelect(),
             'date': forms.DateInput(attrs={'type': 'date'}),
             'feed_type': forms.TextInput(attrs={'placeholder': 'e.g. Hay, Grain Mix, Pasture'}),
             'quantity_kg': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 class MilkProductionRecordForm(forms.ModelForm):
@@ -991,28 +1083,46 @@ class EggProductionRecordForm(forms.ModelForm):
 class PoultryFeedLogForm(forms.ModelForm):
     class Meta:
         model = PoultryFeedLog
-        fields = ['batch', 'date', 'feed_type', 'quantity_kg', 'cost', 'notes']
+        fields = ['batch', 'date', 'feed_type', 'quantity_kg', 'cost', 'budget_item', 'notes']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'feed_type': forms.TextInput(attrs={'placeholder': 'e.g. Starter, Grower, Layer Mash'}),
             'quantity_kg': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
             'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'notes': forms.Textarea(attrs={'rows': 3}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 class PoultryHealthRecordForm(forms.ModelForm):
     class Meta:
         model = PoultryHealthRecord
         fields = ['batch', 'record_type', 'date', 'description', 'medication',
-                  'cost', 'birds_affected', 'next_due_date']
+                  'cost', 'budget_item', 'birds_affected', 'next_due_date']
         widgets = {
             'date': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.Textarea(attrs={'rows': 3}),
             'medication': forms.TextInput(attrs={'placeholder': 'e.g. Newcastle Vaccine'}),
             'cost': forms.NumberInput(attrs={'step': '0.01', 'placeholder': '0.00'}),
+            'budget_item': SubcodeTaggedSelect(),
             'next_due_date': forms.DateInput(attrs={'type': 'date'}),
         }
+        labels = {
+            'budget_item': 'Budget item (for the cost)',
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        _require_budget_item(self, 'cost')
+        return cleaned
 
 
 # -- Registry: maps (app_label, model_name) -> Form class --

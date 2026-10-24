@@ -1311,7 +1311,8 @@ def _expense_list(request, app, model):
     status = request.GET.get('status', '')
 
     queryset = scoped_queryset(Expense, request.user, Expense.objects.select_related(
-        'category', 'crop_season', 'field', 'farm_profile'
+        'category', 'crop_season', 'field', 'farm_profile',
+        'budget_item', 'budget_item__subcode',
     ).order_by('-date', '-id'))
 
     if q:
@@ -3083,18 +3084,31 @@ def equipment_detail_view(request, pk):
     obj = get_object_or_404(
         scoped_queryset(Equipment, request.user).select_related('farm_profile'), pk=pk)
     maint = obj.maintenance_logs.order_by('-date')[:15]
-    usage = obj.usage_records.select_related('field', 'crop_season', 'crop_season__crop').order_by('-date')[:15]
+    usage = obj.usage_records.select_related(
+        'field', 'crop_season', 'crop_season__crop', 'operator').order_by('-date')[:15]
     usage_totals = obj.usage_records.aggregate(
-        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()))
+        hours=Coalesce(Sum('hours'), 0, output_field=DecimalField()),
+        fuel_liters=Coalesce(Sum('fuel_liters'), 0, output_field=DecimalField()),
+        fuel_cost=Coalesce(Sum('fuel_cost'), 0, output_field=DecimalField()))
     maint_spend = obj.total_maintenance_cost
     ownership_cost = maint_spend + obj.depreciation
+    today = datetime.date.today()
+    next_service = obj.maintenance_logs.filter(
+        Q(next_due_date__isnull=False) | Q(next_due_hours__isnull=False)
+    ).order_by('next_due_date', 'next_due_hours').first()
+    service_overdue = bool(
+        next_service and (
+            (next_service.next_due_date and next_service.next_due_date < today)
+            or (next_service.next_due_hours
+                and next_service.next_due_hours <= obj.hours_used)))
     equipment_age = ''
     if obj.purchase_date:
-        days = (datetime.date.today() - obj.purchase_date).days
+        days = (today - obj.purchase_date).days
         equipment_age = f'{days // 365} yrs {(days % 365) // 30} mo' if days >= 365 else (
             f'{days // 30} months' if days >= 60 else f'{days} days')
     info_rows = [
         {'label': 'Type', 'value': obj.get_equipment_type_display()},
+        {'label': 'Ownership', 'value': obj.get_ownership_display()},
         {'label': 'Purchase Date', 'value': obj.purchase_date or '-'},
         {'label': 'Age', 'value': equipment_age or '-'},
         {'label': 'Purchase Cost', 'value': obj.purchase_cost, 'kind': 'money'},
@@ -3105,6 +3119,7 @@ def equipment_detail_view(request, pk):
     ]
     cost_rows = [
         {'label': 'Maintenance Spend', 'value': maint_spend, 'kind': 'money'},
+        {'label': 'Fuel Cost (logged)', 'value': usage_totals['fuel_cost'], 'kind': 'money'},
         {'label': 'Depreciation', 'value': obj.depreciation, 'kind': 'money'},
         {'label': 'Total Cost of Ownership', 'value': ownership_cost, 'kind': 'money'},
         {'label': 'Hours Used', 'value': f'{obj.hours_used}h'},
@@ -3112,17 +3127,26 @@ def equipment_detail_view(request, pk):
         {'label': 'Last Service', 'value': maint[0].date if maint else 'Never'},
         {'label': 'Last Used', 'value': usage[0].date if usage else 'Never'},
     ]
+    def _due_text(l):
+        parts = []
+        if l.next_due_date:
+            parts.append(str(l.next_due_date))
+        if l.next_due_hours:
+            parts.append(f'{l.next_due_hours}h')
+        return ' · '.join(parts) if parts else '-'
     maint_table = {
         'title': 'Maintenance History',
         'columns': [
             {'key': 'date', 'label': 'Date'},
             {'key': 'description', 'label': 'Work Done'},
             {'key': 'by', 'label': 'Performed By'},
+            {'key': 'due', 'label': 'Next Due'},
             {'key': 'cost', 'label': 'Cost', 'class': 'num'},
         ],
         'rows': _table_rows(maint, lambda l: {
             'date': l.date, 'description': l.description[:80],
-            'by': l.performed_by or '-', 'cost': _money(l.cost),
+            'by': l.performed_by or '-',
+            'due': _due_text(l), 'cost': _money(l.cost),
         }),
         'list_url': reverse('model_list', args=['equipment', 'maintenancelog']),
         'empty': 'No maintenance logged.',
@@ -3133,15 +3157,20 @@ def equipment_detail_view(request, pk):
             {'key': 'date', 'label': 'Date'},
             {'key': 'field', 'label': 'Field'},
             {'key': 'season', 'label': 'Season'},
+            {'key': 'operator', 'label': 'Operator'},
             {'key': 'work', 'label': 'Work'},
             {'key': 'hours', 'label': 'Hours', 'class': 'num'},
+            {'key': 'fuel', 'label': 'Fuel', 'class': 'num'},
         ],
         'rows': _table_rows(usage, lambda u: {
             'date': u.date,
             'field': _main(u.field.name, '') if u.field_id else '-',
             'season': str(u.crop_season) if u.crop_season_id else '-',
+            'operator': u.operator.name if u.operator_id else '-',
             'work': u.description[:60] or '-',
             'hours': f'{u.hours}h',
+            'fuel': (f'{u.fuel_liters:.2f}'.rstrip('0').rstrip('.') + 'L'
+                     if u.fuel_liters else '-'),
         }),
         'list_url': reverse('model_list', args=['equipment', 'equipmentusage']),
         'empty': 'No usage logged.',
@@ -3162,6 +3191,9 @@ def equipment_detail_view(request, pk):
         'maint_table': maint_table,
         'usage_table': usage_table,
         'logged_hours': usage_totals['hours'],
+        'fuel_liters': usage_totals['fuel_liters'],
+        'next_service': next_service,
+        'service_overdue': service_overdue,
         'new_maint_url': f"{reverse('model_create', kwargs={'app': 'equipment', 'model': 'maintenancelog'})}?equipment={obj.pk}",
         'new_usage_url': f"{reverse('model_create', kwargs={'app': 'equipment', 'model': 'equipmentusage'})}?equipment={obj.pk}",
     }
@@ -3429,12 +3461,14 @@ def payroll_generate_view(request, pk):
 @login_required
 def payroll_complete_view(request, pk):
     from labor.models import PayrollRun
+    from labor.services import sync_payroll_run_expenses
     if request.method != 'POST':
         raise Http404
     obj = get_object_or_404(scoped_queryset(PayrollRun, request.user, write=True), pk=pk)
     if obj.status != PayrollRun.PayrollStatus.COMPLETED:
         obj.status = PayrollRun.PayrollStatus.COMPLETED
         obj.save(update_fields=['status', 'updated_at'])
+    sync_payroll_run_expenses(obj)
     return HttpResponseRedirect(request.META.get('HTTP_REFERER')
                                 or reverse('payrollrun_detail', args=[pk]))
 

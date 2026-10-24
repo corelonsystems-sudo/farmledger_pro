@@ -62,6 +62,9 @@
         <div class="summary-row"><span class="label">Moisture</span><span class="value">{% if harvest.moisture_content %}{{ harvest.moisture_content }}%{% else %}-{% endif %}</span></div>
         <div class="summary-row"><span class="label">Season</span><span class="value">{{ harvest.crop_season }}</span></div>
         <div class="summary-row"><span class="label">Field</span><span class="value">{{ harvest.crop_season.field|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Harvest Cost</span><span class="value">{% if harvest.cost %}{{ harvest.cost|as_currency:currency }}{% else %}-{% endif %}</span></div>
+        <div class="summary-row"><span class="label">Harvested By</span><span class="value">{{ harvest.performed_by|default:"-" }}</span></div>
+        <div class="summary-row"><span class="label">Budget Item</span><span class="value">{{ harvest.budget_item|default:"-" }}</span></div>
     </div>
 
     <div class="summary-card">

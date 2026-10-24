@@ -172,17 +172,73 @@ def sync_processing_expense(stage):
             defaults={'name': 'Processing', 'schedule_f_line': sched_line,
                       'description': 'Crop processing costs'},
         )
+        from expenses.services import default_budget_item
         synced = {
             'farm_profile': farm_profile,
-            'category': category,
+            'category': stage.budget_item.category if stage.budget_item_id else category,
             'crop_season': season,
-            'budget_item': stage.budget_item,
+            'budget_item': stage.budget_item or default_budget_item(
+                farm_profile,
+                stage.budget_item.category if stage.budget_item_id else category),
             'amount': stage.cost,
             'date': stage.end_date or stage.start_date or stage.harvest.harvest_date,
             'notes': f'Auto-generated from processing stage {stage.sequence}. {stage.name}',
         }
         if expense is None:
             Expense.objects.create(processing_stage=stage, **synced)
+        else:
+            for attr, value in synced.items():
+                setattr(expense, attr, value)
+            expense.save(update_fields=[*synced.keys(), 'updated_at'])
+
+
+def sync_harvest_expense(harvest):
+    """Keep exactly one auto-generated Expense per harvest record.
+
+    The harvest's ``cost`` is posted under the "Harvesting" category
+    (Schedule F custom-hire line, tagged to the crop season) so season/budget
+    actuals and the harvest's net profit include harvest spend. The record's
+    ``budget_item`` drives the expense category when set. Zero-cost harvests
+    remove a stale expense instead.
+    """
+    from expenses.models import Category, Expense
+
+    with transaction.atomic():
+        expense = Expense.objects.filter(harvest_record=harvest).first()
+        if not harvest.cost or harvest.cost <= 0:
+            if expense is not None:
+                expense.delete()
+            return
+
+        season = harvest.crop_season
+        farm_profile = season.field.farm_profile if season and season.field_id else None
+        if farm_profile is None:
+            return
+        from expenses.models import ScheduleLine
+        sched_line, _ = ScheduleLine.objects.get_or_create(
+            code='part1_custom_hire', defaults={'name': 'Custom hire (machine work)'})
+        category, _ = Category.objects.get_or_create(
+            code='HARV',
+            defaults={'name': 'Harvesting', 'schedule_f_line': sched_line,
+                      'description': 'Harvest labor and machine-hire costs'},
+        )
+        if harvest.budget_item_id:
+            category = harvest.budget_item.category
+        from expenses.services import default_budget_item
+        synced = {
+            'farm_profile': farm_profile,
+            'category': category,
+            'crop_season': season,
+            'field': season.field,
+            'budget_item': harvest.budget_item or default_budget_item(
+                farm_profile, category),
+            'amount': harvest.cost,
+            'date': harvest.harvest_date,
+            'vendor': harvest.performed_by,
+            'notes': f'Harvesting: {harvest}',
+        }
+        if expense is None:
+            Expense.objects.create(harvest_record=harvest, **synced)
         else:
             for attr, value in synced.items():
                 setattr(expense, attr, value)

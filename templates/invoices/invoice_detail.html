@@ -147,6 +147,7 @@
             {% endif %}
         {% elif balance > 0 and invoice.status != 'CANCELLED' %}
         <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">Record Payment</a>
+        {% if mtn_enabled %}<a class="btn btn-secondary" href="javascript:void(0)" id="mtnPayBtn">Pay with MTN</a>{% endif %}
         {% endif %}
         <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ delete_url }}" data-modal-title="Delete {% if invoice.is_proforma %}Proforma{% else %}Invoice{% endif %}">Delete</a>
         {% endif %}
@@ -323,9 +324,36 @@
     <div class="table-card-head">
         <h3>Payments Received</h3>
         {% if can_write and balance > 0 and invoice.status != 'CANCELLED' %}
-        <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">+ Record Payment</a>
+        <div style="display:flex; gap:8px;">
+            {% if mtn_enabled %}<a class="btn btn-primary" href="javascript:void(0)" id="mtnPayBtn2">+ Pay with MTN</a>{% endif %}
+            <a class="btn btn-primary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">+ Record Payment</a>
+        </div>
         {% endif %}
     </div>
+    {% if mtn_txns %}
+    <div style="overflow-x:auto; margin-bottom:16px;">
+    <table class="pay-table">
+        <thead>
+            <tr><th>MTN Request</th><th>Phone</th><th>Sent</th><th>Status</th><th class="num">Amount</th></tr>
+        </thead>
+        <tbody>
+            {% for t in mtn_txns %}
+            <tr>
+                <td><strong>{{ t.external_id|default:t.reference_id }}</strong></td>
+                <td>{{ t.payer_msisdn }}</td>
+                <td>{{ t.created_at|date:"d M Y, H:i" }}</td>
+                <td>
+                    {% if t.status == 'SUCCESSFUL' %}<span class="pill-badge pill-green">Paid</span>
+                    {% elif t.status == 'FAILED' %}<span class="pill-badge pill-red">Failed{% if t.status_reason %} - {{ t.status_reason|truncatechars:30 }}{% endif %}</span>
+                    {% else %}<span class="pill-badge pill-amber">Awaiting approval</span>{% endif %}
+                </td>
+                <td class="num amount">{{ t.amount|as_currency:currency }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
     {% if payments %}
     <div style="overflow-x:auto;">
     <table class="pay-table">
@@ -391,4 +419,115 @@
     });
 })();
 </script>
+
+{% if mtn_enabled and balance > 0 and not invoice.is_proforma %}
+<div id="mtnModal" data-status-url="{% url 'mtn_payment_status' '00000000-0000-0000-0000-000000000000' %}" data-pay-url="{{ mtn_pay_url }}" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,.55); align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:12px; padding:22px; width:min(420px,92vw); box-shadow:0 20px 50px rgba(0,0,0,.25);">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            <div style="width:34px;height:34px;border-radius:8px;background:#ffcb05;display:grid;place-items:center;font-weight:800;color:#000;font-size:.7rem;">MTN</div>
+            <h3 style="margin:0;color:#1b4332;">Pay with MTN Mobile Money</h3>
+        </div>
+        <p style="margin:0 0 14px;font-size:.78rem;color:#64748b;">The customer receives a prompt on their phone to approve the payment for <strong>{{ invoice.number }}</strong>.</p>
+        <form id="mtnPayForm">
+            {% csrf_token %}
+            <div class="form-group" style="margin-bottom:10px;">
+                <label style="display:block;font-size:.72rem;font-weight:700;color:#64748b;margin-bottom:4px;">MTN PHONE NUMBER</label>
+                <input type="tel" name="phone" id="mtnPhone" placeholder="e.g. 0772 123456" required
+                       style="width:100%;padding:9px 12px;border:1px solid #d4dcd7;border-radius:6px;font-size:.9rem;">
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label style="display:block;font-size:.72rem;font-weight:700;color:#64748b;margin-bottom:4px;">AMOUNT ({{ currency.code }})</label>
+                <input type="number" name="amount" id="mtnAmount" value="{{ balance }}" min="0.01" max="{{ balance }}" step="0.01" required
+                       style="width:100%;padding:9px 12px;border:1px solid #d4dcd7;border-radius:6px;font-size:.9rem;">
+            </div>
+            <div id="mtnMsg" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:6px;font-size:.78rem;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" id="mtnCancel">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="mtnSend">Send Request</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+(function () {
+    const modal = document.getElementById('mtnModal');
+    const openBtn = document.getElementById('mtnPayBtn');
+    const cancelBtn = document.getElementById('mtnCancel');
+    const form = document.getElementById('mtnPayForm');
+    const msg = document.getElementById('mtnMsg');
+    const sendBtn = document.getElementById('mtnSend');
+    const statusBase = modal.dataset.statusUrl;
+    let pollTimer = null;
+    function showMsg(text, ok) {
+        msg.style.display = 'block';
+        msg.style.background = ok ? '#eef7f0' : '#fef2f2';
+        msg.style.color = ok ? '#14532d' : '#b91c1c';
+        msg.style.border = '1px solid ' + (ok ? '#bfe3cc' : '#fecaca');
+        msg.textContent = text;
+    }
+    function closeModal() {
+        modal.style.display = 'none';
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+    ['mtnPayBtn', 'mtnPayBtn2'].forEach(function (id) {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', function () { modal.style.display = 'flex'; });
+    });
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+    function pollStatus(ref, attempts) {
+        fetch(statusBase.replace('00000000-0000-0000-0000-000000000000', ref), {
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        }).then(r => r.json()).then(data => {
+            if (data.status === 'SUCCESSFUL') {
+                if (pollTimer) clearInterval(pollTimer);
+                showMsg('Payment received! Updating invoice...', true);
+                setTimeout(function () { window.location.reload(); }, 1200);
+            } else if (data.status === 'FAILED') {
+                if (pollTimer) clearInterval(pollTimer);
+                showMsg('Payment failed' + (data.reason ? ': ' + data.reason : '.') , false);
+                sendBtn.disabled = false;
+            } else if (attempts > 40) {
+                if (pollTimer) clearInterval(pollTimer);
+                showMsg('Still waiting for approval. The payment will complete once the customer approves it.', true);
+                sendBtn.disabled = false;
+            }
+        }).catch(function () {
+            if (pollTimer) clearInterval(pollTimer);
+            showMsg('Could not check payment status.', false);
+            sendBtn.disabled = false;
+        });
+    }
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        sendBtn.disabled = true;
+        msg.style.display = 'none';
+        fetch(modal.dataset.payUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value,
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({
+                phone: document.getElementById('mtnPhone').value,
+                amount: document.getElementById('mtnAmount').value,
+            }),
+        }).then(r => r.json().then(d => ({ok: r.ok, d}))).then(({ok, d}) => {
+            if (!ok) {
+                showMsg(d.error || 'Could not send the payment request.', false);
+                sendBtn.disabled = false;
+                return;
+            }
+            showMsg('Request sent. Ask the customer to approve the prompt on their phone...', true);
+            let attempts = 0;
+            pollTimer = setInterval(function () { pollStatus(d.reference_id, ++attempts); }, 3000);
+        }).catch(function () {
+            showMsg('Network error - could not send the request.', false);
+            sendBtn.disabled = false;
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}
