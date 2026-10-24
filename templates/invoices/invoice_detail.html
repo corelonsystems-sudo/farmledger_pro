@@ -147,7 +147,7 @@
             {% endif %}
         {% elif balance > 0 and invoice.status != 'CANCELLED' %}
         <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ payment_url }}" data-modal-title="Record Payment - {{ invoice.number }}">Record Payment</a>
-        {% if mtn_enabled %}<a class="btn btn-secondary" href="javascript:void(0)" id="mtnPayBtn">Pay with MTN</a>{% endif %}
+        <!-- {% if mtn_enabled %}<a class="btn btn-secondary" href="javascript:void(0)" id="mtnPayBtn">Pay with MTN</a>{% endif %} -->
         {% endif %}
         <a class="btn btn-secondary" href="javascript:void(0)" data-modal-url="{{ delete_url }}" data-modal-title="Delete {% if invoice.is_proforma %}Proforma{% else %}Invoice{% endif %}">Delete</a>
         {% endif %}
